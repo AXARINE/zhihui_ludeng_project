@@ -16,3 +16,4 @@ server/backend/target/
 # 云凭证与设备密钥(勿提交)
 credentials.csv
 DEVICES-*.txt
+C3_e53_sc1_pls/include/app_config.h

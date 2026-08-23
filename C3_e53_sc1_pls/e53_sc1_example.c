@@ -32,14 +32,11 @@
 
 #include "E53_SC1.h"
 
-/* ===== 联网配置:烧录前按实际环境修改 ===== */
-#define CONFIG_WIFI_SSID "YOUR_WIFI_SSID"   // 当前电脑所连 Wi-Fi(2.4GHz 同名)
-#define CONFIG_WIFI_PWD "YOUR_WIFI_PSK"          // Wi-Fi 密码
+/* ===== 联网配置:真实凭据在 include/app_config.h(.gitignore 忽略) ===== */
+#include "app_config.h"
 
 #define CONFIG_APP_SERVERIP "69b5bf8bcd.st1.iotda-device.cn-south-1.myhuaweicloud.com" // IoTDA 实例设备侧域名
 #define CONFIG_APP_SERVERPORT "1883"
-#define CONFIG_APP_DEVICEID "YOUR_DEVICE_ID"  // IoTDA 注册设备后生成
-#define CONFIG_APP_DEVICEPWD "YOUR_DEVICE_SECRET" // 设备密钥
 #define CONFIG_APP_LIFETIME 60              ///< 心跳周期,秒
 
 #define CONFIG_QUEUE_TIMEOUT (5 * 1000)
