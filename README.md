@@ -1,60 +1,97 @@
 # 智慧路灯(BearPi-HM Nano)
 
-基于小熊派 **BearPi-HM Nano** 开发板(海思 Hi3861,RISC-V 32 位,OpenHarmony 轻量系统 + LiteOS-M)和 E53_SC1 传感器扩展板的智慧路灯项目。需求见 `04_智慧路灯_基本功能清单.md`,实施计划见 `05_华为云IoTDA实施计划.md`。
+基于小熊派 **BearPi-HM Nano** 开发板(海思 Hi3861,RISC-V 32 位,OpenHarmony 轻量系统 + LiteOS-M)、E53_SC1 传感器扩展板(BH1750 光照传感器 + 补光灯)和**华为云 IoTDA** 的智慧路灯项目。
 
-架构:设备端 Wi-Fi 接入**华为云 IoTDA**(上报光照/灯态属性,接收灯控命令与阈值属性设置,保留本地光照联动);本地 **Rust 后端**(axum)经 IoTDA 北向 API(AK/SK V11 衍生签名)轮询设备影子存入 PostgreSQL,提供 REST API(实时/历史光照、手动控灯、阈值管理、设备在线状态与离线告警)。
+需求见 `04_智慧路灯_基本功能清单.md`,实施计划与踩坑记录见 `05_华为云IoTDA实施计划.md`,AI 代理工作手册见 `AGENTS.md`。
+
+## 架构
+
+```
+Hi3861 --Wi-Fi/MQTT(oc_mqtt)--> 华为云 IoTDA(标准版实例, cn-south-1)
+                                     ↑ 北向 API(HTTPS, AK/SK V11 衍生签名)
+本地 WSL:Rust 后端(axum, 8080) --> PostgreSQL(Docker)
+```
+
+## 已实现功能(全链路已验收)
+
+- 实时光照监测(BH1750,设备每 5s 上报,后端每 8s 轮询入库)
+- 历史光照数据(PostgreSQL 存储,REST 查询)
+- 光照联动开关灯(设备端本地判断,断网可用)
+- 手动远程控灯(ON / OFF / AUTO 恢复联动)
+- 光照阈值云端下发(可写属性 `Threshold`)
+- 设备在线状态监控 + 离线告警(以 IoTDA 设备状态为准,恢复自动消解)
+- 设备注册/管理 REST API
 
 ## 目录说明
 
 | 路径 | 内容 |
 |---|---|
-| `C3_e53_sc1_pls/` | 固件源码(路灯样例,基于官方 E53_SC1 样例修改) |
-| `04_智慧路灯_基本功能清单.md` | 需求文档(用户故事/业务流程) |
-| `build.sh` | Docker 一键编译(自动把样例同步进源码树) |
-| `flash.sh` | 一键烧录(内置 WSL2 环境修复) |
-| `gen-compdb.sh` | 重新生成 clangd 用的 compile_commands.json(一般不用手动跑) |
+| `C3_e53_sc1_pls/` | 固件源码(基于官方 E53_SC1 + D9_iot_cloud_oc_light 样例) |
+| `server/backend/` | Rust 后端(axum + sqlx + reqwest,IoTDA 北向客户端) |
+| `server/infra-up.sh` | 启动 PostgreSQL(WSL 原生 docker) |
+| `build.sh` / `flash.sh` | Docker 一键编译 / 一键烧录 |
+| `gen-compdb.sh` | 重新生成 clangd 用的 compile_commands.json |
 | `bearpi-serial.ps1` | 串口日志查看脚本(Windows PowerShell) |
 | `tools/hiburn_windows/` | HiBurn 烧录工具(Windows 版) |
 
-## 前置条件
+## 快速开始
 
-- **WSL2 Ubuntu** + Docker,拉取镜像 `openharmony/openharmony-docker:0.0.3`
-- **OpenHarmony 源码树**:gitee 仓库 `bearpi/bearpi-hm_nano`(master)克隆到 `~/bearpi/bearpi-hm_nano`(其他位置用 `BEARPI_ROOT=/path/to/bearpi` 环境变量指定)
-- 编辑源码树的 `applications/BearPi/BearPi-HM_Nano/sample/BUILD.gn`,在 `features` 里启用 `"C3_e53_sc1_pls:e53_sc1_example"`、屏蔽其他样例
-- 开发板 USB 连接 Windows(串口为 COM4 或按实际),Hi3861 串口驱动(CH340)已安装
+### 1. 固件
 
-## 构建 → 烧录 → 看日志 全流程
+前置:WSL2 Ubuntu + Docker(镜像 `openharmony/openharmony-docker:0.0.3`)、OpenHarmony 源码树克隆到 `~/bearpi/bearpi-hm_nano`、`sample/BUILD.gn` 已启用 `"C3_e53_sc1_pls:e53_sc1_example"`。
+
+在 `C3_e53_sc1_pls/e53_sc1_example.c` 顶部填入你的配置(Wi-Fi、IoTDA 实例设备侧域名、设备 ID/密钥),然后:
 
 ```bash
-# 1. 编译(WSL 内,仓库根目录)
-./build.sh
-#    产物: $BEARPI_ROOT/bearpi-hm_nano/out/BearPi-HM_Nano/Hi3861_wifiiot_app_allinone.bin
-
-# 2. 烧录(WSL 内,参数为 COM 号数字)
-./flash.sh 4
-#    HiBurn 窗口打开后,按一下开发板 RESET 键开始烧录,看到 FLASH OK 即成功
-
-# 3. 烧录完成后再按一次 RESET,才会运行新固件
+./build.sh        # 编译
+./flash.sh 4      # 烧录(HiBurn 弹出后按一下 RESET)
+# 烧完再按一次 RESET 运行
 ```
 
-```powershell
-# 4. 看日志(Windows PowerShell,115200 波特率)
-pwsh -File bearpi-serial.ps1          # 默认 COM4,可 -Com 5 换口
+串口日志(Windows PowerShell,115200):`pwsh -File bearpi-serial.ps1`
+
+### 2. 后端
+
+```bash
+server/infra-up.sh          # 启动 PostgreSQL
+cd server/backend
+cp .env.example .env        # 填华为云 AK/SK、项目 ID、实例应用侧域名、区域
+cargo run                   # 监听 8080
 ```
+
+REST API(端口 8080):
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET/POST/DELETE | `/api/devices[/:id]` | 设备列表/注册/删除 |
+| GET | `/api/devices/:id/lux/latest` | 实时光照 |
+| GET | `/api/devices/:id/lux/history?from=&to=` | 历史光照(RFC3339 时间) |
+| POST | `/api/devices/:id/lamp` | 控灯 `{"action":"on\|off\|auto"}` |
+| GET/PUT | `/api/devices/:id/threshold` | 阈值查询/下发 |
+| GET | `/api/alarms?device_id=&resolved=` | 告警记录 |
+
+## IoTDA 侧配置要点
+
+1. 创建**标准版实例**,记下接入信息里的**设备侧域名**(填固件)和**应用侧域名**(填 `.env`)。
+2. 创建产品,模型定义服务 `Light`:属性 `Luminance`(int)、`LightStatus`(string)、`Threshold`(int,**可读可写**);命令 `Light_Control_Led`(参数 `Led`:ON/OFF/AUTO)。
+3. 注册设备,拿到设备 ID / 密钥。
+4. IAM 创建用户(AK/SK),用户组挂 IoTDA 权限(如 `IoTDA:*:*`)。
 
 ## 硬件连接
 
-- BH1750 光照传感器:I2C1(GPIO0=SDA / GPIO1=SCL,400kHz),从机地址 0x23,连续低分辨率模式(0x13)
+- BH1750:I2C1(GPIO0=SDA / GPIO1=SCL,400kHz),地址 0x23,连续低分辨率模式
 - 补光灯:GPIO7,高电平点亮
-- 日志:printf → UART0(GPIO3/GPIO4)→ 板载 CH340E → USB → Windows COM 口
+- 日志:printf → UART0 → 板载 CH340E → USB → Windows COM 口
+- 注意:Hi3861 仅支持 2.4GHz Wi-Fi
 
 ## 已知坑(脚本已内置修复,勿回退)
 
-- HiBurn 读不了 `\\wsl.localhost` UNC 路径 → flash.sh 会把 HiBurn + 固件暂存到 Windows `%TEMP%\bearpi-flash` 再烧
-- HiBurn 的 COM 参数必须用数字格式 `-com:4`,`-com:COM4` 会秒退
-- 串口独占:HiBurn 烧录时看不了日志,关掉 HiBurn 再开串口
-- WSL2 看不到 COM 口,不要找 `/dev/ttyS*`;串口查看只能在 Windows 侧进行
+- HiBurn 读不了 `\\wsl.localhost` UNC 路径 → flash.sh 暂存到 Windows `%TEMP%` 再烧;COM 参数必须数字格式 `-com:4`
+- 串口独占:HiBurn 烧录时看不了日志
+- Docker Desktop 读不了 WSL 路径 bind mount → 数据库用 WSL 原生 docker(`infra-up.sh`)
+- 充电器供电时若上电不启动,按一下 RESET
 
-## 修改代码的迭代流程
+## 迭代流程
 
-直接改本仓库的 `C3_e53_sc1_pls/` 里的源码,然后重跑 `./build.sh`(会先同步进源码树再编译)→ `./flash.sh 4` → 按 RESET → 看串口输出。没有单元测试,验收 = 编译通过 + 串口日志符合预期。
+固件:改 `C3_e53_sc1_pls/` → `./build.sh` → `./flash.sh 4` → RESET ×2 → 串口验证。
+后端:改 `server/backend/` → `cargo build` → curl 验证 REST API。
