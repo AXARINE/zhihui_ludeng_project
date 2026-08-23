@@ -31,7 +31,7 @@ Hi3861 --Wi-Fi/MQTT(oc_mqtt)--> 华为云 IoTDA(标准版实例, cn-south-1)
 | 路径 | 内容 |
 |---|---|
 | `smart-street-light/C3_e53_sc1_pls/` | 固件源码:`e53_sc1_example.c`(主逻辑)、`src/E53_SC1.c`(传感器/灯)、`src/wifi_connect.c`(Wi-Fi 连接,复制自官方 D5/D9 样例)、`include/`、`BUILD.gn` |
-| `smart-street-light/server/` | 后端:`backend/`(Rust)、`infra-up.sh`(起数据库)、`docker-compose.yml` + `mosquitto/`(v1 本地直连方案遗留,主链路不用) |
+| `smart-street-light/server/` | 后端:`backend/`(Rust)、`infra-up.sh`(起数据库)。v1 的 Mosquitto 本地直连方案已删除,主链路只用华为云 IoTDA |
 | `smart-street-light/` 其余 | `build.sh` / `flash.sh` / `gen-compdb.sh`、`bearpi-serial.ps1`、`tools/hiburn_windows/`、需求文档与实施计划 |
 | `bearpi-hm_nano/` | OpenHarmony 源码树(`applications/`、`kernel/`、`vendor/`、`out/` 等) |
 | `~/bearpi` 根目录 | 根 `build.sh`/`flash.sh`/`gen-compdb.sh`(不同步 smart-street-light)、`compile_commands.json` + `.clangd`、`tools/`、`raw_notes/` |
@@ -49,7 +49,7 @@ Hi3861 --Wi-Fi/MQTT(oc_mqtt)--> 华为云 IoTDA(标准版实例, cn-south-1)
 - **两个任务**:`task_main_entry`(10KB 栈,Wi-Fi → oc_mqtt 连 IoTDA,队列处理下行命令/属性设置/上报)、`task_sensor_entry`(4KB 栈,50ms 采样 + 本地灯控 + 每 5s 推上报)。
 - **联网配置**:`e53_sc1_example.c` 顶部 `CONFIG_WIFI_SSID/PWD`、`CONFIG_APP_SERVERIP`(IoTDA **实例设备侧域名**,`xxx.st1.iotda-device.cn-south-1.myhuaweicloud.com`)、`CONFIG_APP_DEVICEID/DEVICEPWD`。**这些是明文真实凭据,已在 git 历史中——分享仓库前注意**。
 - **产品模型**(服务 `Light`,建产品时手工建的):属性 `Luminance`(int)+ `LightStatus`(string)每 5s 上报;命令 `Light_Control_Led`(Led=ON/OFF/AUTO);可写属性 `Threshold`(int,**必须"可读可写"**,否则下发报 IOTDA.000029)。
-- **控制模式**:auto(默认,`Lux < Threshold` 本地开关灯)/ manual(收到 ON/OFF 进入,收到 AUTO 恢复)。
+- **控制模式**:auto(默认,施密特触发开关灯:迟滞带 + 扣除灯光自照度 `LAMP_SELF_LUX` + 连续 1s 确认,防开灯照回传感器引起的自反馈频闪;参数在 `e53_sc1_example.c` 顶部 `LUX_HYSTERESIS/LAMP_SELF_LUX/SWITCH_CONFIRM_TICKS`)/ manual(收到 ON/OFF 进入,收到 AUTO 恢复)。
 - BH1750 连续低分辨率模式(0x13,16ms);换算系数 `result * 7`;补光灯 GPIO7 高电平点亮。
 - Hi3861 只支持 **2.4GHz Wi-Fi**;实测 WPA2/WPA3 混合模式路由器可连。
 

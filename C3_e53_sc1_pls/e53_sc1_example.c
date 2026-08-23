@@ -45,6 +45,11 @@
 #define SENSOR_SAMPLE_US 50000              // 50ms 采样周期
 #define REPORT_INTERVAL_TICKS 100           // 5s = 100 x 50ms
 
+/* auto 模式防闪烁(施密特触发 + 灯光自照度补偿 + 连续确认) */
+#define LUX_HYSTERESIS 20                   // 迟滞半带(lx),需 > 读数噪声(L-res 1 计数≈7lx)
+#define LAMP_SELF_LUX 200                   // 补光灯在传感器处的自照度估计(lx),需实测校准
+#define SWITCH_CONFIRM_TICKS 20             // 切换条件需连续满足的采样数(20 x 50ms = 1s)
+
 #define MODE_AUTO 0   // 光照联动
 #define MODE_MANUAL 1 // 手动控制(云端下发)
 
@@ -347,7 +352,8 @@ static int task_main_entry(void) {
 
 /***************************************************************
  * 函数名称: task_sensor_entry
- * 说    明: 光照采集任务,50ms 周期采样;auto 模式按阈值本地开关灯;
+ * 说    明: 光照采集任务,50ms 周期采样;auto 模式施密特触发开关灯
+ *           (迟滞带 + 扣除灯光自照度 + 连续 1s 确认,防阈值附近频闪);
  *           每 5s 推一条上报消息到队列
  * 参    数: 无
  * 返 回 值: 0
@@ -356,6 +362,7 @@ static int task_sensor_entry(void) {
   app_msg_t *app_msg;
   float lux;
   int tick = 0;
+  int confirm_ticks = 0;
 
   E53_SC1_Init();
   usleep(20000); // 等待 BH1750 完成第一次转换(16ms)
@@ -367,7 +374,32 @@ static int task_sensor_entry(void) {
   while (1) {
     lux = E53_SC1_Read_Data();
     if (g_mode == MODE_AUTO) {
-      LampSet(lux < g_threshold ? 1 : 0);
+      /* 直接 lux < threshold 翻转灯会频闪:补光灯照回传感器,开灯读数
+       * 立刻越过阈值 -> 关灯 -> 掉回 -> 再开,形成 10Hz 自反馈振荡。
+       * 这里灯亮时扣除自照度只按环境光判断,并加迟滞带与连续确认。 */
+      float basis = lux;
+      int want;
+      if (g_app_cb.led) {
+        basis -= LAMP_SELF_LUX;
+        if (basis < 0) {
+          basis = 0;
+        }
+        want = (basis > (float)g_threshold + LUX_HYSTERESIS) ? 0 : 1;
+      } else {
+        want = (basis < (float)g_threshold - LUX_HYSTERESIS) ? 1 : 0;
+      }
+      if (want != g_app_cb.led) {
+        if (++confirm_ticks >= SWITCH_CONFIRM_TICKS) {
+          confirm_ticks = 0;
+          LampSet(want);
+          printf("lamp %s(auto, lux=%.1f basis=%.1f th=%d)\r\n",
+                 want ? "ON" : "OFF", lux, basis, g_threshold);
+        }
+      } else {
+        confirm_ticks = 0;
+      }
+    } else {
+      confirm_ticks = 0;
     }
 
     if (++tick >= REPORT_INTERVAL_TICKS) {
