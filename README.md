@@ -1,8 +1,8 @@
 # 智慧路灯(BearPi-HM Nano)
 
-基于小熊派 **BearPi-HM Nano** 开发板(海思 Hi3861,RISC-V 32 位,OpenHarmony 轻量系统 + LiteOS-M)和 E53_SC1 传感器扩展板的智慧路灯样例。需求见 `04_智慧路灯_基本功能清单.md`。
+基于小熊派 **BearPi-HM Nano** 开发板(海思 Hi3861,RISC-V 32 位,OpenHarmony 轻量系统 + LiteOS-M)和 E53_SC1 传感器扩展板的智慧路灯项目。需求见 `04_智慧路灯_基本功能清单.md`,实施计划见 `05_华为云IoTDA实施计划.md`。
 
-当前固件功能:BH1750 光照传感器连续采样(50ms 周期),**Lux < 40 自动开灯**,否则关灯;光照值通过串口打印。
+架构:设备端 Wi-Fi 接入**华为云 IoTDA**(上报光照/灯态属性,接收灯控命令与阈值属性设置,保留本地光照联动);本地 **Rust 后端**(axum)经 IoTDA 北向 API(AK/SK V11 衍生签名)轮询设备影子存入 PostgreSQL,提供 REST API(实时/历史光照、手动控灯、阈值管理、设备在线状态与离线告警)。
 
 ## 目录说明
 

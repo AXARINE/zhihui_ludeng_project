@@ -14,6 +14,7 @@
 static_library("e53_sc1_example") {
     sources = [
         "src/E53_SC1.c",
+        "src/wifi_connect.c",
         "e53_sc1_example.c"
     ]
 
@@ -21,6 +22,16 @@ static_library("e53_sc1_example") {
         "//utils/native/lite/include",
         "//kernel/liteos_m/components/cmsis/2.0",
         "//base/iot_hardware/interfaces/kits/wifiiot_lite",
+        "//foundation/communication/interfaces/kits/wifi_lite/wifiservice",
+        "//vendor/hisi/hi3861/hi3861/third_party/lwip_sack/include/",
+        "//third_party/cJSON",
+        "//third_party/iot_link/oc_mqtt/oc_mqtt_al",
+        "//third_party/iot_link/oc_mqtt/oc_mqtt_profile_v5",
+        "//third_party/iot_link/inc",
+        "//third_party/iot_link/queue",
         "include"
+    ]
+    deps = [
+        "//third_party/iot_link:iot_link",
     ]
 }

@@ -6,14 +6,14 @@
 
 小熊派 **BearPi-HM Nano** 开发板(海思 **Hi3861**,RISC-V 32 位,352KB SRAM / 2MB Flash,运行 OpenHarmony 轻量系统 + LiteOS-M 内核)的智慧路灯项目与开发环境。基于 E53_SC1 传感器扩展板(BH1750 光照传感器 + 补光灯),用 **WSL2 + Docker** 代替官方 VMware 镜像做编译环境。
 
-需求文档 `04_智慧路灯_基本功能清单.md` 描述的是完整愿景(光照 MQTT 上报、后端、前端 ECharts 展示、阈值管理、心跳/离线告警、RAG 维护问答等)。**当前只实现了设备端本地功能**:BH1750 连续采样(50ms 周期),`Lux < 40` 自动开灯、否则关灯,光照值串口打印。联网/后端/前端部分尚未开始,改代码前注意区分"需求文档写的"和"已实现的"。
+需求文档 `04_智慧路灯_基本功能清单.md` 描述的是完整愿景(光照上报、后端、前端 ECharts 展示、阈值管理、心跳/离线告警、RAG 维护问答等)。实施计划见 `05_华为云IoTDA实施计划.md`。**当前架构(2026-08 起)**:设备端接**华为云 IoTDA**(oc_mqtt,参考官方 D9 样例);本地 Rust 后端(axum)通过 **IoTDA 北向 API**(AK/SK V11-HMAC-SHA256 衍生签名)轮询设备影子入库 PostgreSQL 并提供 REST API。前端不在本仓库范围内(由他人负责)。
 
 ## 两个 git 仓库与代码权威来源
 
 | 仓库 | 路径 | 说明 |
 |---|---|---|
 | 环境仓库 | `~/bearpi` 本身 | 构建/烧录脚本、需求文档、工具。无远程;`.gitignore` 忽略 `bearpi-hm_nano/`、`tools/`、`raw_notes/`、`compile_commands.json`、`.clangd`、`AGENTS.md`、`.agent`、`.cache` |
-| 智慧路灯仓库 | `~/bearpi/smart-street-light/` | **当前主战场,独立 git 仓库(尚无提交、无远程)**。固件源码的**权威副本**在 `smart-street-light/C3_e53_sc1_pls/`,改固件代码改这里 |
+| 智慧路灯仓库 | `~/bearpi/smart-street-light/` | **当前主战场,独立 git 仓库(已有初始提交、无远程)**。固件源码的**权威副本**在 `smart-street-light/C3_e53_sc1_pls/`,改固件代码改这里 |
 | 源码树仓库 | `~/bearpi/bearpi-hm_nano/` | 官方 gitee 仓库 `bearpi/bearpi-hm_nano`(master)的检出,OpenHarmony 全量源码。**不要直接改** `sample/C3_e53_sc1_pls/` —— 它是 smart-street-light 仓库的同步副本,直接改会在下次 `./build.sh` 时被覆盖 |
 
 同步是单向的:`smart-street-light/build.sh` 第 16 行 `cp -r` 把本仓库样例覆盖进源码树后再编译。反向不会自动发生。
@@ -22,7 +22,7 @@
 
 | 路径 | 内容 |
 |---|---|
-| `smart-street-light/` | 智慧路灯项目本体:`C3_e53_sc1_pls/`(固件源码:`e53_sc1_example.c` + `src/E53_SC1.c` + `include/E53_SC1.h` + `BUILD.gn`)、`build.sh` / `flash.sh` / `gen-compdb.sh`(支持 `BEARPI_ROOT` 环境变量)、`bearpi-serial.ps1`、`tools/hiburn_windows/`、`README.md`、需求文档副本 |
+| `smart-street-light/` | 智慧路灯项目本体:`C3_e53_sc1_pls/`(固件源码:`e53_sc1_example.c` + `src/E53_SC1.c` + `src/wifi_connect.c` + `include/` + `BUILD.gn`)、`server/`(后端,见下文)、`build.sh` / `flash.sh` / `gen-compdb.sh`(支持 `BEARPI_ROOT` 环境变量)、`bearpi-serial.ps1`、`tools/hiburn_windows/`、`README.md`、需求文档与实施计划 |
 | `bearpi-hm_nano/` | OpenHarmony 源码树。顶层:`applications/`(应用)、`base/` `foundation/`(系统服务)、`kernel/`、`drivers/`、`build/`(构建脚本)、`vendor/`、`out/`(编译产物) |
 | `bearpi-hm_nano/applications/BearPi/BearPi-HM_Nano/sample/` | 官方样例:A 系列(内核)、B 系列(基础外设)、C 系列(E53 传感器)、D 系列(物联网/云)、Z 系列(开发者贡献)。每个样例一个目录,内含 `BUILD.gn` + 源码 |
 | `build.sh` / `flash.sh` / `gen-compdb.sh`(根目录) | 对**源码树当前内容**直接编译/烧录(不做 smart-street-light 同步);日常迭代用 smart-street-light 里的同名脚本 |
@@ -49,14 +49,24 @@
 - 代码风格:跟随官方样例 —— C 语言、Apache 2.0 许可证头、中文函数头注释块(函数名称/说明/参数/返回值)。改样例时保持原文件风格。
 - **没有单元测试框架**;验证方式 = 编译通过 + 烧录后看串口输出是否符合预期。
 
-## 当前固件状态(C3_e53_sc1_pls 修改版)
+## 当前固件状态(C3_e53_sc1_pls IoTDA 版)
 
-涉及文件:`smart-street-light/C3_e53_sc1_pls/e53_sc1_example.c`、`src/E53_SC1.c`、`include/E53_SC1.h`(源码树内为同步副本,当前一致)。
+涉及文件:`smart-street-light/C3_e53_sc1_pls/e53_sc1_example.c`、`src/E53_SC1.c`、`src/wifi_connect.c`(复制自 D5/D9 样例)、`include/`(源码树内为同步副本,当前一致)。
 
-- BH1750 配置为**连续低分辨率模式**(0x13,测量周期 16ms);`E53_SC1_Read_Data()` 的换算系数实际是 `result * 7`(注释里写的 ×6.25 是理论值,以代码为准)。
-- 主循环 `usleep(50000)` = **50ms 周期**(代码里 "10ms" 的注释已过时),串口约 20 行/秒。
-- 灯控阈值:**`Lux < 40` 开灯**,否则关灯。
-- 硬件连接:BH1750 光照传感器接 I2C1(GPIO0=SDA / GPIO1=SCL,400kHz),从机地址 0x23;补光灯接 GPIO7,高电平点亮。
+- **两个任务**:`task_main_entry`(10KB 栈,Wi-Fi → oc_mqtt 连 IoTDA,队列处理下行命令/属性设置/上报请求)、`task_sensor_entry`(4KB 栈,50ms 采样 + 本地灯控 + 每 5s 推上报消息)。
+- **联网配置**:`e53_sc1_example.c` 顶部 `CONFIG_WIFI_SSID/PWD`、`CONFIG_APP_SERVERIP`(IoTDA 接入域名,当前 cn-south-1)、`CONFIG_APP_DEVICEID/DEVICEPWD` 已填真实值。**注意这些值(尤其密钥)在固件源码里是明文,提交/分享前留意**。
+- **产品模型**(IoTDA 服务 `Light`):属性 `Luminance`(int)+ `LightStatus`(string)每 5s 上报;命令 `Light_Control_Led`(Led=ON/OFF/AUTO);可写属性 `Threshold`(属性设置回调更新运行时阈值,默认 40)。
+- **控制模式**:auto(默认,`Lux < 阈值` 本地开关灯)/ manual(收到 ON/OFF 命令后进入,光照逻辑暂停;收到 AUTO 恢复)。
+- BH1750 连续低分辨率模式(0x13,16ms);换算系数 `result * 7`;补光灯 GPIO7 高电平点亮。
+
+## 后端服务(smart-street-light/server/)
+
+- `server/docker-compose.yml`:PostgreSQL 16(Mosquitto 为 v1 本地方案遗留,主链路不再使用)。
+- **启动数据库**:Docker Desktop 读不了 `\\wsl.localhost` bind mount(同 flash.sh 的坑)→ 用 `server/infra-up.sh`(自动复制到 `%TEMP%\streetlight-server` 后 `docker.exe compose up -d`)。
+- `server/backend/`:Rust(axum + sqlx + reqwest)。**运行前**:复制 `.env.example` 为 `.env` 填华为云 AK/SK、项目 ID、区域;`cd server/backend && set -a && . ./.env && set +a && cargo run`。端口 8080。
+- 结构:`main.rs`(装配)、`iothub.rs`(IoTDA 北向客户端,AK/SK 的 V11-HMAC-SHA256 衍生签名 —— 标准版实例必须,旧版 SDK-HMAC-SHA256 会 401 IOTDA.000002 + 8s 轮询影子/设备状态入库)、`api.rs`(REST)、`migrations/0001_init.sql`(device/lux_record/config/alarm 四表)。
+- REST API:`GET/POST/DELETE /api/devices[/:id]`、`GET /api/devices/:id/lux/latest|history`、`POST /api/devices/:id/lamp` `{"action":"on|off|auto"}`、`GET/PUT /api/devices/:id/threshold`、`GET /api/alarms`。
+- 设备需先 `POST /api/devices` 注册(用 IoTDA 的设备 ID)才会被轮询;离线告警以 IoTDA 设备状态(ONLINE/OFFLINE)为准。
 
 ## 看设备输出(printf 日志)
 
