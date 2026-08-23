@@ -1,0 +1,12 @@
+# 编辑器 / 语言服务器缓存
+.cache/
+.agent/
+.clangd
+compile_commands.json
+
+# 临时与系统垃圾文件
+*.tmp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini

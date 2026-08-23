@@ -1,0 +1,93 @@
+# AGENTS.md — BearPi-HM Nano 智慧路灯项目指南
+
+本文件是 AI 代理操作本项目的工作手册,假定读者对本项目一无所知。项目根 = `~/bearpi`(WSL2 Ubuntu 内,Windows 侧访问路径为 `\\wsl.localhost\Ubuntu\home\alkari\bearpi`)。用户交流语言:中文。
+
+## 项目是什么
+
+小熊派 **BearPi-HM Nano** 开发板(海思 **Hi3861**,RISC-V 32 位,352KB SRAM / 2MB Flash,运行 OpenHarmony 轻量系统 + LiteOS-M 内核)的智慧路灯项目与开发环境。基于 E53_SC1 传感器扩展板(BH1750 光照传感器 + 补光灯),用 **WSL2 + Docker** 代替官方 VMware 镜像做编译环境。
+
+需求文档 `04_智慧路灯_基本功能清单.md` 描述的是完整愿景(光照 MQTT 上报、后端、前端 ECharts 展示、阈值管理、心跳/离线告警、RAG 维护问答等)。**当前只实现了设备端本地功能**:BH1750 连续采样(50ms 周期),`Lux < 40` 自动开灯、否则关灯,光照值串口打印。联网/后端/前端部分尚未开始,改代码前注意区分"需求文档写的"和"已实现的"。
+
+## 两个 git 仓库与代码权威来源
+
+| 仓库 | 路径 | 说明 |
+|---|---|---|
+| 环境仓库 | `~/bearpi` 本身 | 构建/烧录脚本、需求文档、工具。无远程;`.gitignore` 忽略 `bearpi-hm_nano/`、`tools/`、`raw_notes/`、`compile_commands.json`、`.clangd`、`AGENTS.md`、`.agent`、`.cache` |
+| 智慧路灯仓库 | `~/bearpi/smart-street-light/` | **当前主战场,独立 git 仓库(尚无提交、无远程)**。固件源码的**权威副本**在 `smart-street-light/C3_e53_sc1_pls/`,改固件代码改这里 |
+| 源码树仓库 | `~/bearpi/bearpi-hm_nano/` | 官方 gitee 仓库 `bearpi/bearpi-hm_nano`(master)的检出,OpenHarmony 全量源码。**不要直接改** `sample/C3_e53_sc1_pls/` —— 它是 smart-street-light 仓库的同步副本,直接改会在下次 `./build.sh` 时被覆盖 |
+
+同步是单向的:`smart-street-light/build.sh` 第 16 行 `cp -r` 把本仓库样例覆盖进源码树后再编译。反向不会自动发生。
+
+## 目录结构
+
+| 路径 | 内容 |
+|---|---|
+| `smart-street-light/` | 智慧路灯项目本体:`C3_e53_sc1_pls/`(固件源码:`e53_sc1_example.c` + `src/E53_SC1.c` + `include/E53_SC1.h` + `BUILD.gn`)、`build.sh` / `flash.sh` / `gen-compdb.sh`(支持 `BEARPI_ROOT` 环境变量)、`bearpi-serial.ps1`、`tools/hiburn_windows/`、`README.md`、需求文档副本 |
+| `bearpi-hm_nano/` | OpenHarmony 源码树。顶层:`applications/`(应用)、`base/` `foundation/`(系统服务)、`kernel/`、`drivers/`、`build/`(构建脚本)、`vendor/`、`out/`(编译产物) |
+| `bearpi-hm_nano/applications/BearPi/BearPi-HM_Nano/sample/` | 官方样例:A 系列(内核)、B 系列(基础外设)、C 系列(E53 传感器)、D 系列(物联网/云)、Z 系列(开发者贡献)。每个样例一个目录,内含 `BUILD.gn` + 源码 |
+| `build.sh` / `flash.sh` / `gen-compdb.sh`(根目录) | 对**源码树当前内容**直接编译/烧录(不做 smart-street-light 同步);日常迭代用 smart-street-light 里的同名脚本 |
+| `compile_commands.json` + `.clangd` | Zed/clangd 的编译数据库与配置(由 build.sh 维护,git 已忽略) |
+| `tools/hiburn_windows/` | HiBurn 烧录工具(Windows 版,与 smart-street-light 内副本一致) |
+| `raw_notes/` | 嵌入式教程笔记原始稿(纯文本,与构建无关,git 已忽略) |
+| `04_智慧路灯_基本功能清单.md` | 智慧路灯需求文档(与 smart-street-light 内副本一致) |
+| `.agent/` / `.cache/` | 空目录 / clangd 缓存,均已被 git 忽略 |
+
+## 核心工作流(改固件代码,按顺序)
+
+1. **改代码**:编辑 `smart-street-light/C3_e53_sc1_pls/` 下的源码。
+2. **编译**(WSL 内):`cd ~/bearpi/smart-street-light && ./build.sh` → 先把样例同步进源码树(并校验 `sample/BUILD.gn` 已启用 `"C3_e53_sc1_pls:e53_sc1_example"`,当前已启用)→ Docker 镜像 `openharmony/openharmony-docker:0.0.3` 内执行 `python build.py BearPi-HM_Nano` → 产物 `bearpi-hm_nano/out/BearPi-HM_Nano/Hi3861_wifiiot_app_allinone.bin` → 自动更新 `compile_commands.json`。
+3. **烧录**(WSL 内):`./flash.sh 4`(当前板子是 COM4)→ HiBurn 窗口打开后**提示用户按开发板 RESET 键**开始烧录 → `FLASH OK (HiBurn exit 0)`。
+4. **启动新固件**:烧录完成后**再按一次 RESET** 才会运行新程序(芯片烧完停在下载模式)。
+5. **看日志**:115200 波特率,见下文。
+
+切换其他官方样例时:编辑 `bearpi-hm_nano/applications/BearPi/BearPi-HM_Nano/sample/BUILD.gn`,在 `features` 里启用目标(格式 `"目录名:目标名"`)、屏蔽其他,然后用根目录 `build.sh` 编译。
+
+## 构建系统与代码组织
+
+- 构建基于 OpenHarmony 轻量系统的 **GN + Ninja**:`build.py` 是入口,组件用 `lite_component` 声明,`features` 按 `"目录:目标"` 引用各样例目录里的 `BUILD.gn` 目标(样例自身是 `static_library`)。
+- 应用代码写法:CMSIS-RTOS2 API(`cmsis_os2.h`,`osThreadNew` 创建任务),用 `ohos_init.h` 的 `APP_FEATURE_INIT()` 宏注册入口;外设操作走 Hi3861 SDK 的 `wifiiot_gpio.h` / `wifiiot_i2c.h` / `wifiiot_gpio_ex.h` 等头文件。
+- 代码风格:跟随官方样例 —— C 语言、Apache 2.0 许可证头、中文函数头注释块(函数名称/说明/参数/返回值)。改样例时保持原文件风格。
+- **没有单元测试框架**;验证方式 = 编译通过 + 烧录后看串口输出是否符合预期。
+
+## 当前固件状态(C3_e53_sc1_pls 修改版)
+
+涉及文件:`smart-street-light/C3_e53_sc1_pls/e53_sc1_example.c`、`src/E53_SC1.c`、`include/E53_SC1.h`(源码树内为同步副本,当前一致)。
+
+- BH1750 配置为**连续低分辨率模式**(0x13,测量周期 16ms);`E53_SC1_Read_Data()` 的换算系数实际是 `result * 7`(注释里写的 ×6.25 是理论值,以代码为准)。
+- 主循环 `usleep(50000)` = **50ms 周期**(代码里 "10ms" 的注释已过时),串口约 20 行/秒。
+- 灯控阈值:**`Lux < 40` 开灯**,否则关灯。
+- 硬件连接:BH1750 光照传感器接 I2C1(GPIO0=SDA / GPIO1=SCL,400kHz),从机地址 0x23;补光灯接 GPIO7,高电平点亮。
+
+## 看设备输出(printf 日志)
+
+链路:printf → UART0(GPIO3/GPIO4)→ 板载 CH340E → Type-C USB → Windows COM4 → 串口终端。
+
+| 方式 | 命令/工具 |
+|---|---|
+| Windows PowerShell | `pwsh -File C:\Users\Alkari\Desktop\bearpi-serial.ps1`(默认 COM4,可 `-Com 5`;`smart-street-light/bearpi-serial.ps1` 是同一脚本) |
+| WSL 终端内借道 | `powershell.exe -ExecutionPolicy Bypass -File 'C:\Users\Alkari\Desktop\bearpi-serial.ps1'`(路径必须 Windows 格式 + 单引号) |
+| 图形工具 | MobaXterm → Serial → COM4 / 115200 |
+
+注意:串口独占,HiBurn 开着时看不了日志;波特率错了会乱码;想重播启动日志按 RESET;WSL2 看不到 COM 口,不要找 `/dev/ttyS*`;板子 USB 拔掉后 COM4 消失,先让用户插线。
+
+## 烧录的已知坑(flash.sh 已内置修复,勿回退)
+
+- HiBurn.exe 在 WSL 文件系统里缺执行权限 → 脚本自动 `chmod +x`。
+- HiBurn 读不了 `\\wsl.localhost` 的 UNC 路径(退出码 52/17)→ 脚本自动把 HiBurn + 固件暂存到 Windows 本地临时目录 `%TEMP%\bearpi-flash` 再烧。
+- COM 参数必须用**数字格式** `-com:4`,`-com:COM4` 会秒退。
+
+## Zed/clangd 环境(已修好,勿破坏)
+
+- Zed 的 clangd 插件在 WSL 里运行,项目根 = `/home/alkari/bearpi`。
+- `compile_commands.json` 由 `build.sh` 编译成功后自动生成/更新(ninja compdb + 路径重写,写到项目根);手动重生成用 `gen-compdb.sh`(两个目录里的都行)。
+- `.clangd` 做两件事:①`CompileFlags.Remove` 剔除 GCC 独有参数(`-mtune=size`、`-Werror` 等 6 个,其中 `-mtune=size` 会直接让 clangd 崩溃);②`Add` 两个 `-isystem` 指向工具链头文件。
+- 交叉工具链已从 Docker 提取到 `~/tools/gcc_riscv32`(GCC **7.3.0**,华为定制 hcc_riscv32)。**不要升级工具链版本**:官方生态锁死 7.3.0,scons 脚本/预编译库/`-Werror` 全按它调校。
+- 修改 `.clangd` 后需要用户在 Zed 里重启语言服务器(命令面板 → restart language servers)。
+
+## 操作本项目时的注意事项
+
+- 所有文件在 WSL 9P 挂载上:Windows 侧的 write/edit 工具可能报 `GetFileSecurityW EIO` 或 `ENOTSUP` → 改用 pwsh 的 `Set-Content` 写入;WSL 内直接编辑无此问题。
+- git 操作在 WSL 内执行(Windows git 对 WSL 仓库报 dubious ownership)。根仓库和 `bearpi-hm_nano/`、`smart-street-light/` 是三个独立仓库。
+- Docker 容器以 root 运行,`bearpi-hm_nano/out/` 产物属 root;在源码树仓库里 `git status` 会对这些文件报 `Permission denied`,属已知现象,不要试图 git 操作 `out/`。
+- 烧录和看日志需要**用户物理操作**(按 RESET、插拔线),代理替代不了,流程中要明确提示用户。
+- 改动固件代码后的验收 = `./build.sh` 编译通过 + 烧录后串口日志正确。
