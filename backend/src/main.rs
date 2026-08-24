@@ -8,7 +8,7 @@ use std::sync::Arc;
 #[derive(Clone)]
 pub struct AppState {
     pub db: sqlx::PgPool,
-    /// IoTDA 北向客户端,未配置 HUAWEI_* 环境变量时为 None
+    /// `IoTDA` 北向客户端,未配置 HUAWEI_* 环境变量时为 None
     pub iothub: Option<Arc<IothubClient>>,
 }
 

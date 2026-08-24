@@ -15,14 +15,14 @@ CREATE TABLE IF NOT EXISTS device (
 CREATE TABLE IF NOT EXISTS lux_record (
     id BIGSERIAL PRIMARY KEY,
     device_id TEXT NOT NULL,
-    lux REAL NOT NULL,
+    lux INTEGER NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_lux_record_device_time ON lux_record (device_id, created_at);
 
 CREATE TABLE IF NOT EXISTS config (
     device_id TEXT PRIMARY KEY,
-    threshold REAL NOT NULL DEFAULT 40
+    threshold INTEGER NOT NULL DEFAULT 40
 );
 
 CREATE TABLE IF NOT EXISTS alarm (

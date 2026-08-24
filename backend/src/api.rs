@@ -41,7 +41,7 @@ struct Device {
 struct LuxRecord {
     id: i64,
     device_id: String,
-    lux: f32,
+    lux: i32,
     created_at: chrono::DateTime<chrono::Utc>,
 }
 
@@ -232,18 +232,18 @@ async fn get_threshold(
     State(s): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> ApiResult<Json<serde_json::Value>> {
-    let row: Option<(f32,)> = sqlx::query_as("SELECT threshold FROM config WHERE device_id = $1")
+    let row: Option<(i32,)> = sqlx::query_as("SELECT threshold FROM config WHERE device_id = $1")
         .bind(&id)
         .fetch_optional(&s.db)
         .await
         .map_err(err500)?;
-    let threshold = row.map(|r| r.0).unwrap_or(40.0);
+    let threshold = row.map_or(40, |r| r.0);
     Ok(Json(serde_json::json!({ "device_id": id, "threshold": threshold })))
 }
 
 #[derive(Deserialize)]
 struct ThresholdBody {
-    threshold: f32,
+    threshold: i32,
 }
 
 async fn put_threshold(

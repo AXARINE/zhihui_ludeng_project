@@ -17,23 +17,23 @@ fn hmac_raw(key: &[u8], data: &[u8]) -> Vec<u8> {
     mac.finalize().into_bytes().to_vec()
 }
 
-/// 华为云 IoTDA 北向 API 客户端(AK/SK 签名认证,算法 V11-HMAC-SHA256 衍生签名;标准版/企业版实例必须)
+/// 华为云 `IoTDA` 北向 API 客户端(AK/SK 签名认证,算法 V11-HMAC-SHA256 衍生签名;标准版/企业版实例必须)
 ///
 /// 端点为实例级域名(cn-south-1 等区域无共享域名),
-/// 通过 HUAWEI_IOTDA_ENDPOINT 配置,形如 xxx.st1.iotda-app.cn-south-1.myhuaweicloud.com
+/// 通过 `HUAWEI_IOTDA_ENDPOINT` 配置,形如 xxx.st1.iotda-app.cn-south-1.myhuaweicloud.com
 pub struct IothubClient {
-    http: reqwest::Client,
     endpoint: String,
     region: String,
     project_id: String,
     ak: String,
     sk: String,
+    http: reqwest::Client,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
 pub struct ShadowProps {
-    pub luminance: Option<f64>,
     pub light_status: Option<String>,
+    pub luminance: Option<i64>,
 }
 
 impl IothubClient {
@@ -87,11 +87,11 @@ impl IothubClient {
 
     /// 按华为云 V11-HMAC-SHA256 衍生签名算法生成 Authorization 头
     ///
-    /// IoTDA 标准版/企业版实例必须使用衍生签名(官方 SDK: WithDerivedPredicate);
-    /// 基础版共享域名才用旧版 SDK-HMAC-SHA256。与官方 SDK derived_signer.go 对齐:
+    /// `IoTDA` 标准版/企业版实例必须使用衍生签名(官方 SDK: `WithDerivedPredicate`);
+    /// 基础版共享域名才用旧版 SDK-HMAC-SHA256。与官方 SDK `derived_signer.go` 对齐:
     /// 1. info = {YYYYMMDD}/{region}/iotdm,service 固定 "iotdm"
     /// 2. 派生密钥 = HKDF(SHA-256, ikm=SK, salt=AK, info=info) 的 32 字节,再 hex 编码后作为 HMAC key
-    /// 3. 规范 URI 以 '/' 结尾、规范头部块与 SignedHeaders 之间多一个空行(与旧算法相同)
+    /// 3. 规范 URI 以 '/' 结尾、规范头部块与 `SignedHeaders` 之间多一个空行(与旧算法相同)
     fn sign(&self, method: &str, uri: &str, sdk_date: &str, body: &str) -> String {
         let signed_headers = "content-type;host;x-sdk-date";
         let canonical_headers = format!(
@@ -192,7 +192,7 @@ impl IothubClient {
             .and_then(|arr| arr.iter().find(|s| s["service_id"] == "Light"))
             .map(|s| &s["reported"]["properties"]);
         Ok(props.map(|p| ShadowProps {
-            luminance: p["Luminance"].as_f64(),
+            luminance: p["Luminance"].as_i64(),
             light_status: p["LightStatus"].as_str().map(String::from),
         }))
     }
@@ -209,7 +209,7 @@ impl IothubClient {
         Ok(v["status"].as_str().unwrap_or("UNKNOWN").to_string())
     }
 
-    /// 下发 Light_Control_Led 命令(Led: ON/OFF/AUTO)
+    /// 下发 `Light_Control_Led` 命令(Led: ON/OFF/AUTO)
     pub async fn control_led(&self, device_id: &str, led: &str) -> anyhow::Result<()> {
         let body = serde_json::json!({
             "service_id": "Light",
@@ -232,7 +232,7 @@ impl IothubClient {
     }
 
     /// 设置 Threshold 可写属性
-    pub async fn set_threshold(&self, device_id: &str, threshold: f32) -> anyhow::Result<()> {
+    pub async fn set_threshold(&self, device_id: &str, threshold: i32) -> anyhow::Result<()> {
         let body = serde_json::json!({
             "services": [{
                 "service_id": "Light",
@@ -324,7 +324,7 @@ async fn poll_device(
         if let Some(lux) = props.luminance {
             sqlx::query("INSERT INTO lux_record (device_id, lux) VALUES ($1, $2)")
                 .bind(device_id)
-                .bind(lux as f32)
+                .bind(lux as i32)
                 .execute(&state.db)
                 .await?;
         }
