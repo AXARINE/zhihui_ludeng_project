@@ -1,82 +1,99 @@
 # 智慧路灯(BearPi-HM Nano)
 
-基于小熊派 **BearPi-HM Nano** 开发板(海思 Hi3861,RISC-V 32 位,OpenHarmony 轻量系统 + LiteOS-M)、E53_SC1 传感器扩展板(BH1750 光照传感器 + 补光灯)和**华为云 IoTDA** 的智慧路灯项目。
+基于小熊派 **BearPi-HM Nano**(海思 Hi3861,RISC-V 32 位,OpenHarmony 轻量系统 + LiteOS-M)、E53_SC1 扩展板(BH1750 光照传感器 + 补光灯),经**华为云 IoTDA** 接入的智慧路灯项目。
 
-需求见 `04_智慧路灯_基本功能清单.md`,实施计划与踩坑记录见 `05_华为云IoTDA实施计划.md`,AI 代理工作手册见 `AGENTS.md`。
+需求文档:`智慧路灯_基本功能清单.md`;实施计划与踩坑记录:`华为云IoTDA实施计划.md`。
 
 ## 架构
 
 ```
-Hi3861 --Wi-Fi/MQTT(oc_mqtt)--> 华为云 IoTDA(标准版实例, cn-south-1)
-                                     ↑ 北向 API(HTTPS, AK/SK V11 衍生签名)
-本地 WSL:Rust 后端(axum, 8080) --> PostgreSQL(Docker)
+Hi3861 --Wi-Fi/MQTTS(oc_mqtt, 8883 TLS)--> 华为云 IoTDA(标准版实例, cn-south-1)
+                                              ↑ 北向 API(HTTPS, AK/SK V11 衍生签名)
+本地:Rust 后端(axum, 8080) --> PostgreSQL(Docker)
 ```
+
+- **设备端**:BH1750 每 50ms 采样,本地按阈值联动开关灯(断网可用),每 5s 上报影子属性;
+- **云端**:IoTDA 保存设备影子与在线状态,负责下行命令/属性转发;
+- **后端**:每 8s 轮询影子入库,对前端提供 REST API(前端不在本仓库)。
 
 ## 已实现功能(全链路已验收)
 
-- 实时光照监测(BH1750,设备每 5s 上报,后端每 8s 轮询入库)
-- 历史光照数据(PostgreSQL 存储,REST 查询)
-- 光照联动开关灯(设备端本地判断,断网可用)
-- 手动远程控灯(ON / OFF / AUTO 恢复联动)
+- 实时光照监测、历史数据查询
+- 光照联动开关灯(施密特触发 + 迟滞带,防开灯自照引起的频闪)
+- 远程控灯(ON / OFF / AUTO 恢复联动)
 - 光照阈值云端下发(可写属性 `Threshold`)
-- 设备在线状态监控 + 离线告警(以 IoTDA 设备状态为准,恢复自动消解)
-- 设备注册/管理 REST API
+- 设备在线状态监控、离线告警(恢复自动消解)
+- 控制指令留痕(动作/来源/北向受理结果,可审计)
+- 设备管理(注册、位置、删除)
+- 设备链路 MQTTS 加密(设备密钥不再明文传输)
 
 ## 目录说明
 
 | 路径 | 内容 |
 |---|---|
-| `C3_e53_sc1_pls/` | 固件源码(基于官方 E53_SC1 + D9_iot_cloud_oc_light 样例) |
-| `backend/` | Rust 后端(axum + sqlx + reqwest,IoTDA 北向客户端)、`migrations/`(PostgreSQL 建库脚本,后端启动时自动执行)、`infra-up.sh`(启动 PostgreSQL,WSL 原生 docker) |
+| `C3_e53_sc1_pls/` | 固件源码(权威副本,改固件只改这里;基于官方 E53_SC1 + D9 样例) |
+| `bearpi-hm_nano/` | OpenHarmony 源码树(git submodule,gitee 官方仓库;build.sh 自动同步样例进去再编译) |
+| `backend/` | Rust 后端(axum + sqlx + reqwest):`src/`、`migrations/`(PostgreSQL 建库脚本,启动自动执行)、`infra-up.sh`(起数据库) |
 | `build.sh` / `flash.sh` | Docker 一键编译 / 一键烧录 |
 | `gen-compdb.sh` | 重新生成 clangd 用的 compile_commands.json |
-| `bearpi-hm_nano/` | OpenHarmony 源码树(git submodule,指向 gitee 官方仓库;build.sh 自动把固件样例同步进去再编译) |
 | `bearpi-serial.ps1` | 串口日志查看脚本(Windows PowerShell) |
 | `tools/hiburn_windows/` | HiBurn 烧录工具(Windows 版) |
 
 ## 快速开始
 
-### 1. 固件
+### 0. 克隆
 
-前置:WSL2 Ubuntu + Docker(镜像 `openharmony/openharmony-docker:0.0.3`)。本仓库用 **git submodule** 携带 OpenHarmony 源码树(`bearpi-hm_nano/`,gitee 官方仓库),克隆时加 `--recursive`(或克隆后 `git submodule update --init`);`sample/BUILD.gn` 的样例启用由 build.sh 自动处理。
-
-复制 `C3_e53_sc1_pls/include/app_config.example.h` 为 `app_config.h`,填入你的 Wi-Fi SSID/密码和 IoTDA 设备 ID/密钥(该文件被 .gitignore 忽略);IoTDA 实例设备侧域名改 `C3_e53_sc1_pls/e53_sc1_example.c` 顶部的 `CONFIG_APP_SERVERIP`。然后:
+本仓库用 **git submodule** 携带 OpenHarmony 源码树,克隆时必须加 `--recursive`:
 
 ```bash
-./build.sh        # 编译
-./flash.sh 4      # 烧录(HiBurn 弹出后按一下 RESET)
-# 烧完再按一次 RESET 运行
+git clone --recursive <仓库地址>
+# 已克隆的补上:git submodule update --init
 ```
 
-串口日志(Windows PowerShell,115200):`pwsh -File bearpi-serial.ps1`
+### 1. 固件
+
+前置:WSL2 Ubuntu + Docker(镜像 `openharmony/openharmony-docker:0.0.3`)。
+
+复制 `C3_e53_sc1_pls/include/app_config.example.h` 为 `app_config.h`,填入你的 Wi-Fi SSID/密码和 IoTDA 设备 ID/密钥(该文件被 .gitignore 忽略,不会进仓库);IoTDA 实例设备侧域名改 `C3_e53_sc1_pls/e53_sc1_example.c` 顶部的 `CONFIG_APP_SERVERIP`。然后:
+
+```bash
+./build.sh        # 编译(自动同步样例、启用 BUILD.gn)
+./flash.sh 4      # 烧录:HiBurn 弹出后按一下开发板 RESET,烧完再按一次 RESET 运行
+```
+
+串口日志(115200):`pwsh -File bearpi-serial.ps1`
 
 ### 2. 后端
 
+数据库是 **PostgreSQL**;表结构由后端启动时自动创建(`migrations/`,sqlx 迁移),**无需手工导入任何 SQL**。
+
 ```bash
-backend/infra-up.sh         # 启动 PostgreSQL
+backend/infra-up.sh         # 启动 PostgreSQL(容器 streetlight-postgres)
 cd backend
 cp .env.example .env        # 填华为云 AK/SK、项目 ID、实例应用侧域名、区域
-cargo run                   # 监听 8080
+cargo run                   # 监听 8080,首次启动自动建表
 ```
 
-REST API(端口 8080):
+### 3. REST API(端口 8080)
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET/POST/DELETE | `/api/devices[/:id]` | 设备列表/注册/删除 |
+| GET/POST/DELETE | `/api/devices[/:id]` | 设备列表/注册(可带 name、location)/删除 |
 | GET | `/api/devices/:id/lux/latest` | 实时光照 |
-| GET | `/api/devices/:id/lux/history?from=&to=` | 历史光照(RFC3339 时间) |
+| GET | `/api/devices/:id/lux/history?from=&to=` | 历史光照(RFC3339 时间,上限 5000 条倒序) |
 | POST | `/api/devices/:id/lamp` | 控灯 `{"action":"on\|off\|auto"}` |
-| GET | `/api/devices/:id/commands` | 控制指令留痕(审计) |
+| GET | `/api/devices/:id/commands` | 控制指令留痕 |
 | GET/PUT | `/api/devices/:id/threshold` | 阈值查询/下发 |
-| GET | `/api/alarms?device_id=&resolved=` | 告警记录 |
+| GET | `/api/alarms?device_id=&resolved=` | 告警记录(resolved 过滤已消解) |
+
+注意:控灯/阈值是透传 IoTDA 北向的,设备离线时北向拒绝(返回 500 带原因);`sent` 仅表示北向已受理,不代表灯已动作。
 
 ## IoTDA 侧配置要点
 
-1. 创建**标准版实例**,记下接入信息里的**设备侧域名**(填固件)和**应用侧域名**(填 `.env`)。
-2. 创建产品,模型定义服务 `Light`:属性 `Luminance`(int)、`LightStatus`(string)、`Threshold`(int,**可读可写**);命令 `Light_Control_Led`(参数 `Led`:ON/OFF/AUTO)。
-3. 注册设备,拿到设备 ID / 密钥。
-4. IAM 创建用户(AK/SK),用户组挂 IoTDA 权限(如 `IoTDA:*:*`)。
+1. 创建**标准版实例**,在"实例 → 接入信息"记下**设备侧域名**(填固件,MQTT 1883 / MQTTS 8883)和**应用侧域名**(填 `.env`);标准版没有区域共享域名。
+2. 创建产品,模型定义服务 `Light`:属性 `Luminance`(int)、`LightStatus`(string)、`Threshold`(int,**必须可读可写**);命令 `Light_Control_Led`(参数 `Led`:ON/OFF/AUTO)。
+3. 注册设备,拿到设备 ID / 密钥(填 `app_config.h`)。
+4. IAM 创建用户(AK/SK),用户组挂 IoTDA 权限(如 `IoTDA:*:*`),授权有数分钟传播延迟。
 
 ## 硬件连接
 
@@ -84,6 +101,11 @@ REST API(端口 8080):
 - 补光灯:GPIO7,高电平点亮
 - 日志:printf → UART0 → 板载 CH340E → USB → Windows COM 口
 - 注意:Hi3861 仅支持 2.4GHz Wi-Fi
+
+## 安全说明
+
+- 设备 → IoTDA 使用 8883 MQTTS(TLS,证书链校验,根 CA 内嵌 `include/iotda_ca.h`)。已知边界:设备无 RTC 不校验证书有效期;iot_link 栈不校验服务器主机名。
+- Wi-Fi 密码与设备密钥只存在于本地 `app_config.h`(被 .gitignore 忽略),不进任何 git 仓库。
 
 ## 已知坑(脚本已内置修复,勿回退)
 
@@ -94,5 +116,6 @@ REST API(端口 8080):
 
 ## 迭代流程
 
-固件:改 `C3_e53_sc1_pls/` → `./build.sh` → `./flash.sh 4` → RESET ×2 → 串口验证。
-后端:改 `backend/` → `cargo build` → curl 验证 REST API。
+- 固件:改 `C3_e53_sc1_pls/` → `./build.sh` → `./flash.sh 4` → RESET ×2 → 串口验证
+- 后端:改 `backend/` → `cargo build` → curl 验证 REST API
+- 数据库 schema:未上线前可直接改 `backend/migrations/0001_init.sql` 并清卷重建;上线后必须新建递增迁移
