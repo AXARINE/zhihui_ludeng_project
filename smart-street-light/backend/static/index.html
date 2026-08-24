@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智慧路灯 · 管理后台</title>
+<style>
+  :root{
+    color-scheme: light;
+    --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e; --muted:#898781;
+    --grid:#e1e0d9; --border:rgba(11,11,11,0.10);
+    --blue:#2a78d6; --orange:#eb6834;
+    --good:#0ca30c; --critical:#d03b3b; --warning:#fab219;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:where(:not([data-theme="light"])){
+      color-scheme: dark;
+      --page:#0d0d0d; --surface:#1a1a19; --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
+      --grid:#2c2c2a; --border:rgba(255,255,255,0.10);
+      --blue:#3987e5; --orange:#d95926;
+    }
+  }
+  :root[data-theme="dark"]{
+    color-scheme: dark;
+    --page:#0d0d0d; --surface:#1a1a19; --ink:#ffffff; --ink2:#c3c2b7; --muted:#898781;
+    --grid:#2c2c2a; --border:rgba(255,255,255,0.10);
+    --blue:#3987e5; --orange:#d95926;
+  }
+  *{box-sizing:border-box}
+  body{margin:0; background:var(--page); color:var(--ink);
+    font-family:system-ui,-apple-system,"Segoe UI","Microsoft YaHei",sans-serif;
+    line-height:1.5; padding:28px 20px 60px}
+  .wrap{max-width:1080px; margin:0 auto}
+  header{display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-bottom:6px}
+  h1{font-size:21px; font-weight:700; margin:0}
+  .badge{display:inline-flex; align-items:center; gap:7px; font-size:13px; color:var(--ink2);
+    border:1px solid var(--border); border-radius:999px; padding:4px 12px; background:var(--surface)}
+  .dot{width:9px; height:9px; border-radius:50%; background:var(--good); box-shadow:0 0 0 3px rgba(12,163,12,0.18)}
+  .dot.off{background:var(--critical); box-shadow:0 0 0 3px rgba(208,59,59,0.16)}
+  .sub{color:var(--ink2); font-size:13px; margin:2px 0 20px}
+  button{font-family:inherit; cursor:pointer}
+  .btn{font-size:13px; border:1px solid var(--border); background:var(--surface); color:var(--ink);
+    border-radius:8px; padding:7px 14px}
+  .btn.primary{background:var(--blue); border-color:var(--blue); color:#fff}
+  .btn.danger{color:var(--critical); border-color:rgba(208,59,59,0.35)}
+  .btn:hover{filter:brightness(0.96)}
+
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; margin-bottom:16px}
+  .card{background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:18px 20px}
+  .card h2{font-size:15px; font-weight:650; margin:0 0 14px; display:flex; align-items:center; gap:10px}
+  .card h2 .cnt{font-size:12px; color:var(--muted); font-weight:400}
+
+  form{display:flex; flex-wrap:wrap; gap:10px}
+  input,select{font-family:inherit; font-size:13px; color:var(--ink); background:var(--page);
+    border:1px solid var(--border); border-radius:8px; padding:7px 10px; min-width:0}
+  input:focus,select:focus{outline:2px solid var(--blue); outline-offset:-1px}
+  .grow{flex:1 1 120px}
+
+  table{width:100%; border-collapse:collapse; font-size:13px}
+  th,td{text-align:left; padding:8px 10px; border-bottom:1px solid var(--grid); vertical-align:middle}
+  th{color:var(--muted); font-weight:600; font-size:12px}
+  tbody tr:last-child td{border-bottom:none}
+  .code{font-family:ui-monospace,"Cascadia Code",Consolas,monospace; font-size:12px; color:var(--ink2)}
+  .muted{color:var(--muted)} .small{font-size:12px}
+  .empty{color:var(--muted); font-size:13px; padding:8px 10px}
+
+  .pill{display:inline-flex; align-items:center; gap:6px; font-size:12px; padding:2px 9px; border-radius:999px; white-space:nowrap}
+  .pill::before{content:""; width:7px; height:7px; border-radius:50%; background:currentColor}
+  .pill.on{color:var(--good); background:rgba(12,163,12,0.12)}
+  .pill.off{color:var(--critical); background:rgba(208,59,59,0.12)}
+  .pill.warn{color:#8a6400; background:rgba(250,178,25,0.16)}
+  .pill.info{color:var(--blue); background:rgba(42,120,214,0.12)}
+  .role-tag{display:inline-block; font-size:12px; padding:2px 10px; border-radius:6px; font-weight:600; color:#fff}
+  .role-tag.municipal{background:var(--blue)}
+  .role-tag.admin{background:var(--orange)}
+
+  .chat{display:flex; flex-direction:column; gap:10px}
+  .chat-log{height:260px; overflow-y:auto; border:1px solid var(--border); border-radius:10px;
+    padding:12px; background:var(--page); display:flex; flex-direction:column; gap:10px}
+  .msg{max-width:82%; padding:8px 12px; border-radius:12px; font-size:13px; line-height:1.55;
+    white-space:pre-wrap; word-break:break-word}
+  .msg.q{align-self:flex-end; background:var(--blue); color:#fff; border-bottom-right-radius:4px}
+  .msg.a{align-self:flex-start; background:var(--surface); border:1px solid var(--border); border-bottom-left-radius:4px}
+  .chat-input{display:flex; gap:10px}
+
+  #toast{position:fixed; right:20px; bottom:20px; background:var(--ink); color:var(--surface);
+    padding:10px 16px; border-radius:10px; font-size:13px; opacity:0; transform:translateY(8px);
+    transition:.18s; pointer-events:none; max-width:320px}
+  #toast.show{opacity:1; transform:none}
+  #toast.err{background:var(--critical); color:#fff}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>智慧路灯 · 管理后台</h1>
+    <span class="badge"><span class="dot" id="dbDot"></span><span id="dbStatus">连接中…</span></span>
+    <button class="btn" id="refreshBtn" style="margin-left:auto">刷新数据</button>
+  </header>
+  <div class="sub">账号管理（市政人员 / 路灯管理员 随时增删） · 数据采集接口 <span class="code">/api/data/*</span></div>
+
+  <!-- 账号管理 -->
+  <div class="card" style="margin-bottom:16px">
+    <h2>账号管理 <span class="cnt" id="userCnt"></span></h2>
+    <form id="userForm" style="margin-bottom:16px">
+      <input class="grow" id="u_name" placeholder="用户名" required>
+      <input class="grow" id="u_pwd" type="password" placeholder="密码（≥6位）" required minlength="6">
+      <input class="grow" id="u_real" placeholder="姓名（可选）">
+      <select id="u_role" required></select>
+      <button class="btn primary" type="submit">新增账号</button>
+    </form>
+    <table>
+      <thead><tr><th>ID</th><th>用户名</th><th>姓名</th><th>角色</th><th>状态</th><th>创建时间</th><th></th></tr></thead>
+      <tbody id="userRows"></tbody>
+    </table>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h2>路灯设备 <span class="cnt" id="devCnt"></span></h2>
+      <form id="devForm" style="margin-bottom:16px">
+        <input class="grow" id="d_devid" placeholder="设备ID（唯一，必填）" required>
+        <input class="grow" id="d_name" placeholder="设备名称（可选）">
+        <input class="grow" id="d_loc" placeholder="位置/路段（可选）">
+        <button class="btn primary" type="submit">新增设备</button>
+      </form>
+      <table>
+        <thead><tr><th>设备ID</th><th>名称</th><th>位置</th><th>灯态</th><th>状态</th><th>最后心跳</th><th></th></tr></thead>
+        <tbody id="devRows"></tbody>
+      </table>
+    </div>
+    <div class="card">
+      <h2>告警记录 <span class="cnt" id="alarmCnt"></span></h2>
+      <table>
+        <thead><tr><th>设备</th><th>内容</th><th>状态</th><th></th></tr></thead>
+        <tbody id="alarmRows"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>最近光照上报 <span class="cnt" id="lumCnt"></span></h2>
+    <table>
+      <thead><tr><th>设备ID</th><th>光照 (lux)</th><th>上报时间</th></tr></thead>
+      <tbody id="lumRows"></tbody>
+    </table>
+  </div>
+
+  <div class="card" style="margin-top:16px">
+    <h2>维护智能问答 <span class="cnt">本地检索 · 问数据 / 问维护建议</span></h2>
+    <div class="chat">
+      <div class="chat-log" id="chatLog">
+        <div class="msg a">你好，我是路灯维护助手。可以问我：告警、光照数据、设备状态、阈值、控制记录，或维护建议（如“频繁开关怎么办”）。</div>
+      </div>
+      <form class="chat-input" id="chatForm">
+        <input class="grow" id="chatInput" placeholder="例如：最近7天有哪些告警？" required>
+        <button class="btn primary" type="submit">提问</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let roles = [];
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try { const j = await res.json(); msg = j.detail || msg; } catch(e) {}
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
+function toast(msg, err = false) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.className = err ? 'err show' : 'show';
+  clearTimeout(t._t);
+  t._t = setTimeout(() => t.className = '', 2600);
+}
+
+function roleTag(roleName, roleCode) {
+  const cls = roleCode === 'admin' ? 'admin' : 'municipal';
+  return `<span class="role-tag ${cls}">${roleName}</span>`;
+}
+
+async function loadAll() {
+  try {
+    const health = await api('/api/health');
+    $('#dbDot').className = 'dot';
+    $('#dbStatus').textContent = '数据库已连接';
+    void health;
+  } catch (e) {
+    $('#dbDot').className = 'dot off';
+    $('#dbStatus').textContent = '数据库连接失败';
+    return;
+  }
+  if (!roles.length) {
+    roles = await api('/api/roles');
+    $('#u_role').innerHTML = roles.map(r =>
+      `<option value="${r.id}">${r.role_name}</option>`).join('');
+  }
+  const [users, devices, alarms, lum] = await Promise.all([
+    api('/api/users'), api('/api/devices'), api('/api/alarms'), api('/api/luminance?limit=30'),
+  ]);
+
+  $('#userCnt').textContent = `共 ${users.length} 个账号`;
+  $('#userRows').innerHTML = users.length ? users.map(u => `
+    <tr>
+      <td class="muted">${u.id}</td>
+      <td class="code">${u.username}</td>
+      <td>${u.real_name || '<span class="muted">—</span>'}</td>
+      <td>${roleTag(u.role_name, u.role_code)}</td>
+      <td>${u.status === 1 ? '<span class="pill on">启用</span>' : '<span class="pill off">禁用</span>'}</td>
+      <td class="muted small">${(u.created_at || '').replace('T',' ').slice(0,19)}</td>
+      <td><button class="btn danger" data-user="${u.id}">删除</button></td>
+    </tr>`).join('') : '<tr><td colspan="7" class="empty">暂无账号，请在表单中新增</td></tr>';
+
+  $('#devCnt').textContent = `共 ${devices.length} 台`;
+  $('#devRows').innerHTML = devices.length ? devices.map(d => `
+    <tr>
+      <td class="code">${d.device_id}</td>
+      <td>${d.name || '<span class="muted">—</span>'}</td>
+      <td>${d.location || '<span class="muted">—</span>'}</td>
+      <td>${d.lamp_status === 1 ? '<span class="pill on">开灯</span>' : '<span class="pill off">关灯</span>'}</td>
+      <td>${d.online_status === 1 ? '<span class="pill on">在线</span>' : '<span class="pill off">离线</span>'}</td>
+      <td class="muted small">${d.last_heartbeat ? d.last_heartbeat.replace('T',' ').slice(0,19) : '—'}</td>
+      <td>
+        <button class="btn" data-lamp-on="${d.device_id}">开灯</button>
+        <button class="btn" data-lamp-off="${d.device_id}">关灯</button>
+        <button class="btn danger" data-device="${d.id}">删除</button>
+      </td>
+    </tr>`).join('') : '<tr><td colspan="7" class="empty">暂无设备，请在表单中新增（硬件上报也会自动注册）</td></tr>';
+
+  $('#alarmCnt').textContent = `共 ${alarms.length} 条`;
+  $('#alarmRows').innerHTML = alarms.length ? alarms.map(a => `
+    <tr>
+      <td class="code">${a.device_id}</td>
+      <td>${a.message || a.alarm_type}</td>
+      <td>${a.status === 0 ? '<span class="pill warn">未处理</span>' : '<span class="pill on">已处理</span>'}</td>
+      <td>${a.status === 0 ? `<button class="btn" data-resolve="${a.id}">处理</button>` : '<span class="muted small">—</span>'}</td>
+    </tr>`).join('') : '<tr><td colspan="4" class="empty">暂无告警</td></tr>';
+
+  $('#lumCnt').textContent = `最近 ${lum.length} 条`;
+  $('#lumRows').innerHTML = lum.length ? lum.map(x => `
+    <tr>
+      <td class="code">${x.device_id}</td>
+      <td>${x.luminance}</td>
+      <td class="muted small">${(x.created_at || '').replace('T',' ').slice(0,19)}</td>
+    </tr>`).join('') : '<tr><td colspan="3" class="empty">暂无光照数据</td></tr>';
+}
+
+$('#userForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const body = {
+    username: $('#u_name').value.trim(),
+    password: $('#u_pwd').value,
+    real_name: $('#u_real').value.trim(),
+    role_id: parseInt($('#u_role').value, 10),
+  };
+  try {
+    await api('/api/users', { method: 'POST', body: JSON.stringify(body) });
+    toast(`已新增账号：${body.username}`);
+    $('#u_name').value = ''; $('#u_pwd').value = ''; $('#u_real').value = '';
+    loadAll();
+  } catch (err) { toast(err.message, true); }
+});
+
+document.addEventListener('click', async e => {
+  const on = e.target.closest('button[data-lamp-on]');
+  if (on) {
+    try {
+      await api('/api/control/manual', { method: 'POST',
+        body: JSON.stringify({ device_id: on.getAttribute('data-lamp-on'), action: 'on' }) });
+      toast('已下发开灯指令'); loadAll();
+    } catch (err) { toast(err.message, true); }
+    return;
+  }
+  const off = e.target.closest('button[data-lamp-off]');
+  if (off) {
+    try {
+      await api('/api/control/manual', { method: 'POST',
+        body: JSON.stringify({ device_id: off.getAttribute('data-lamp-off'), action: 'off' }) });
+      toast('已下发关灯指令'); loadAll();
+    } catch (err) { toast(err.message, true); }
+    return;
+  }
+  const r = e.target.closest('button[data-resolve]');
+  if (r) {
+    try {
+      await api(`/api/alarms/${r.getAttribute('data-resolve')}/resolve`, { method: 'POST' });
+      toast('告警已标记为已处理'); loadAll();
+    } catch (err) { toast(err.message, true); }
+    return;
+  }
+  const u = e.target.closest('button[data-user]');
+  if (u) {
+    const id = u.getAttribute('data-user');
+    if (!confirm(`确认删除用户 #${id} ？`)) return;
+    try {
+      await api(`/api/users/${id}`, { method: 'DELETE' });
+      toast(`已删除用户 #${id}`);
+      loadAll();
+    } catch (err) { toast(err.message, true); }
+    return;
+  }
+  const d = e.target.closest('button[data-device]');
+  if (d) {
+    const id = d.getAttribute('data-device');
+    if (!confirm(`确认删除/解绑该设备？将同时清除其光照、告警等关联数据。`)) return;
+    try {
+      await api(`/api/devices/${id}`, { method: 'DELETE' });
+      toast(`已删除设备 #${id}`);
+      loadAll();
+    } catch (err) { toast(err.message, true); }
+  }
+});
+
+$('#devForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const body = {
+    device_id: $('#d_devid').value.trim(),
+    name: $('#d_name').value.trim(),
+    location: $('#d_loc').value.trim(),
+  };
+  try {
+    await api('/api/devices', { method: 'POST', body: JSON.stringify(body) });
+    toast(`已新增设备：${body.device_id}`);
+    $('#d_devid').value = ''; $('#d_name').value = ''; $('#d_loc').value = '';
+    loadAll();
+  } catch (err) { toast(err.message, true); }
+});
+
+$('#chatForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  const q = $('#chatInput').value.trim();
+  if (!q) return;
+  const log = $('#chatLog');
+  log.insertAdjacentHTML('beforeend', `<div class="msg q">${escapeHtml(q)}</div>`);
+  $('#chatInput').value = '';
+  log.scrollTop = log.scrollHeight;
+  try {
+    const r = await api('/api/assistant/ask', { method: 'POST', body: JSON.stringify({ question: q }) });
+    log.insertAdjacentHTML('beforeend', `<div class="msg a">${escapeHtml(r.answer)}</div>`);
+  } catch (err) {
+    log.insertAdjacentHTML('beforeend', `<div class="msg a">请求失败：${escapeHtml(err.message)}</div>`);
+  }
+  log.scrollTop = log.scrollHeight;
+});
+
+$('#refreshBtn').addEventListener('click', loadAll);
+loadAll();
+</script>
+</body>
+</html>
