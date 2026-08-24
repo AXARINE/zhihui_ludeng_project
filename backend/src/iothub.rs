@@ -5,8 +5,8 @@ use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::api::LampAction;
 use crate::AppState;
+use crate::api::LampAction;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -104,12 +104,12 @@ impl IothubClient {
         ]
         .into_iter()
         .map(env_var)
-        .collect::<Option<Vec<_>>>()
-        else {
+        .collect::<Option<Vec<_>>>() else {
             tracing::warn!("HUAWEI_* 环境变量未配置,IoTDA 北向功能停用");
             return Ok(None);
         };
-        let [ak, sk, project_id, endpoint] = <[String; 4]>::try_from(cfg).expect("statically 4 keys");
+        let [ak, sk, project_id, endpoint] =
+            <[String; 4]>::try_from(cfg).expect("statically 4 keys");
         let endpoint = endpoint
             .trim_start_matches("https://")
             .trim_end_matches('/')
@@ -215,7 +215,8 @@ impl IothubClient {
         body: Option<serde_json::Value>,
     ) -> anyhow::Result<reqwest::Response> {
         let raw = body.map(|b| b.to_string());
-        let headers = self.signed_headers(method.as_str(), path, raw.as_deref().unwrap_or_default());
+        let headers =
+            self.signed_headers(method.as_str(), path, raw.as_deref().unwrap_or_default());
         let url = format!("https://{}{}", self.host(), self.path_of(path));
         let req = self.http.request(method, url).headers(headers);
         let req = match raw {
@@ -323,13 +324,12 @@ async fn poll_device(
     let online = iothub.device_status(device_id).await?.is_online();
 
     // 在线状态变化 → 告警产生/消解
-    let changed: Option<(String,)> = sqlx::query_as(
-        "UPDATE device SET status=$2 WHERE id=$1 AND status!=$2 RETURNING id",
-    )
-    .bind(device_id)
-    .bind(if online { "online" } else { "offline" })
-    .fetch_optional(&state.db)
-    .await?;
+    let changed: Option<(String,)> =
+        sqlx::query_as("UPDATE device SET status=$2 WHERE id=$1 AND status!=$2 RETURNING id")
+            .bind(device_id)
+            .bind(if online { "online" } else { "offline" })
+            .fetch_optional(&state.db)
+            .await?;
     if changed.is_some() {
         if online {
             sqlx::query(
@@ -341,10 +341,12 @@ async fn poll_device(
             .await?;
         } else {
             tracing::warn!("device {device_id} offline");
-            sqlx::query("INSERT INTO alarm (device_id, type, message) VALUES ($1, 'offline', '设备离线')")
-                .bind(device_id)
-                .execute(&state.db)
-                .await?;
+            sqlx::query(
+                "INSERT INTO alarm (device_id, type, message) VALUES ($1, 'offline', '设备离线')",
+            )
+            .bind(device_id)
+            .execute(&state.db)
+            .await?;
         }
     }
 

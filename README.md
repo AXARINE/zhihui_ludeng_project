@@ -14,7 +14,7 @@ Hi3861 --Wi-Fi/MQTT(oc_mqtt, 1883)--> 华为云 IoTDA(标准版实例, cn-south-
 
 - **设备端**:BH1750 每 50ms 采样,本地按阈值联动开关灯(断网可用),每 5s 上报影子属性;
 - **云端**:IoTDA 保存设备影子与在线状态,负责下行命令/属性转发;
-- **后端**:每 8s 轮询影子入库,对前端提供 REST API(前端不在本仓库)。
+- **后端**:每 8s 轮询影子入库,对前端提供 REST API(前端不在本仓库);含账号登录 + RBAC 权限(见下文)。
 
 ## 已实现功能(全链路已验收)
 
@@ -25,6 +25,10 @@ Hi3861 --Wi-Fi/MQTT(oc_mqtt, 1883)--> 华为云 IoTDA(标准版实例, cn-south-
 - 设备在线状态监控、离线告警(恢复自动消解)
 - 控制指令留痕(动作/来源/北向受理结果,可审计)
 - 设备管理(注册、位置、删除)
+- 账号 / 登录 / RBAC(JWT + Argon2id,角色:市政人员 / 路灯管理员)
+- Swagger UI 接口文档与在线调试(`/docs`)
+- 告警人工处理(标记已处理 / 恢复未处理)
+- 仪表盘聚合、全局光照 / 指令查询
 
 ## 目录说明
 
@@ -69,23 +73,44 @@ git clone --recursive <仓库地址>
 ```bash
 backend/infra-up.sh         # 启动 PostgreSQL(容器 streetlight-postgres)
 cd backend
-cp .env.example .env        # 填华为云 AK/SK、项目 ID、实例应用侧域名、区域
-cargo run                   # 监听 8080,首次启动自动建表
+cp .env.example .env        # 填华为云 AK/SK、项目 ID、实例应用侧域名、区域(含 JWT_SECRET)
+cargo run                   # 监听 8080,首次启动自动建表并创建引导管理员
 ```
+
+首次启动时若账号表为空,后端按 `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD` 创建管理员
+(默认 `admin` / `admin123`,仅开发用)。浏览器打开 `http://127.0.0.1:8080/docs` 即 Swagger UI:
+先调 `POST /api/auth/login` 拿 token,点右上角 **Authorize** 填入 `Bearer <token>` 即可在线调试所有接口。
 
 ### 3. REST API(端口 8080)
 
-| 方法 | 路径 | 说明 |
-|---|---|---|
-| GET/POST/DELETE | `/api/devices[/:id]` | 设备列表/注册(可带 name、location)/删除 |
-| GET | `/api/devices/:id/lux/latest` | 实时光照 |
-| GET | `/api/devices/:id/lux/history?from=&to=` | 历史光照(RFC3339 时间,上限 5000 条倒序) |
-| POST | `/api/devices/:id/lamp` | 控灯 `{"action":"on\|off\|auto"}` |
-| GET | `/api/devices/:id/commands` | 控制指令留痕 |
-| GET/PUT | `/api/devices/:id/threshold` | 阈值查询/下发 |
-| GET | `/api/alarms?device_id=&resolved=` | 告警记录(resolved 过滤已消解) |
+除 `/api/health`、`/api/auth/login`、`/docs` 外,其余接口都需要请求头 `Authorization: Bearer <token>`。
+权限码在登录响应的 `permissions` 里;路由需要的权限见下表(路灯管理员拥有全部权限)。
 
-注意:控灯/阈值是透传 IoTDA 北向的,设备离线时北向拒绝(返回 500 带原因);`sent` 仅表示北向已受理,不代表灯已动作。
+| 方法 | 路径 | 权限码 | 说明 |
+|---|---|---|---|
+| GET | `/api/health` | 公开 | 健康检查 |
+| POST | `/api/auth/login` | 公开 | 登录,返回 token / 用户 / 角色 / 权限码 |
+| GET | `/api/auth/me` | 登录 | 当前登录用户 |
+| GET | `/api/dashboard` | `device:status` | 首页聚合(设备/告警/24h 光照与指令统计) |
+| GET/POST | `/api/devices` | `device:status` / `device:manage` | 设备列表 / 注册(可带 name、location) |
+| PATCH/DELETE | `/api/devices/:id` | `device:manage` | 修改设备资料 / 删除设备及全部关联数据 |
+| GET | `/api/devices/:id/lux/latest` | `luminance:monitor` | 实时光照 |
+| GET | `/api/devices/:id/lux/history?from=&to=` | `luminance:history` | 历史光照(RFC3339,倒序,上限 5000) |
+| GET | `/api/devices/:id/lux/stats?from=&to=` | `luminance:history` | 条数 / 最低 / 最高 / 平均 / 最新 |
+| GET | `/api/lux/latest` | `luminance:monitor` | 所有设备最新光照 |
+| POST | `/api/devices/:id/lamp` | `control:manual` | 控灯 `{"action":"on\|off\|auto"}` |
+| GET | `/api/devices/:id/commands?from=&to=&limit=` | `command:log` | 单设备指令留痕 |
+| GET | `/api/commands?device_id=&from=&to=&limit=` | `command:log` | 全局指令留痕 |
+| GET/PUT | `/api/devices/:id/threshold` | `config:threshold` | 阈值查询/下发(0~10000) |
+| GET | `/api/alarms?device_id=&resolved=&from=&to=&type=&limit=` | `alarm:log` | 告警记录 |
+| PATCH | `/api/alarms/:id` | `alarm:log` | `{"resolved":true/false}` 处理 / 恢复告警 |
+| GET/POST | `/api/users` | `user:manage` | 账号列表 / 新增(密码 6~64 位) |
+| DELETE | `/api/users/:id` | `user:manage` | 删除账号(不能删自己) |
+| GET | `/api/roles` | `user:manage` | 角色列表 |
+| GET | `/api/permissions` | `user:manage` | 权限点列表 |
+| PUT | `/api/roles/:id/permissions` | `user:manage` | 更新角色-权限映射 |
+
+注意:控灯/阈值是透传 IoTDA 北向的,设备离线时北向拒绝(返回 502 带原因);`sent` 仅表示北向已受理,不代表灯已动作。
 
 ## IoTDA 侧配置要点
 
