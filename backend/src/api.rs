@@ -114,13 +114,16 @@ async fn create_device(
 }
 
 async fn delete_device(State(s): State<Arc<AppState>>, Path(id): Path<String>) -> ApiResult<StatusCode> {
-    for table in ["device", "config", "lux_record", "alarm"] {
-        let col = if table == "device" { "id" } else { "device_id" };
-        sqlx::query(&format!("DELETE FROM {table} WHERE {col} = $1"))
-            .bind(&id)
-            .execute(&s.db)
-            .await
-            .map_err(err500)?;
+    // sqlx 0.9 起 query() 要求 SqlSafeStr(拒收动态 String);表名/列名来自这里的静态白名单
+    for (table, col) in [
+        ("device", "id"),
+        ("config", "device_id"),
+        ("lux_record", "device_id"),
+        ("alarm", "device_id"),
+    ] {
+        let mut qb = sqlx::QueryBuilder::new("DELETE FROM ");
+        qb.push(table).push(" WHERE ").push(col).push(" = ").push_bind(&id);
+        qb.build().execute(&s.db).await.map_err(err500)?;
     }
     Ok(StatusCode::NO_CONTENT)
 }
