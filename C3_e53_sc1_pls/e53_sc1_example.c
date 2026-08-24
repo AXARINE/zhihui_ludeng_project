@@ -34,9 +34,10 @@
 
 /* ===== 联网配置:真实凭据在 include/app_config.h(.gitignore 忽略) ===== */
 #include "app_config.h"
+#include "iotda_ca.h"  // IoTDA 8883(MQTTS)服务器根 CA
 
 #define CONFIG_APP_SERVERIP "69b5bf8bcd.st1.iotda-device.cn-south-1.myhuaweicloud.com" // IoTDA 实例设备侧域名
-#define CONFIG_APP_SERVERPORT "1883"
+#define CONFIG_APP_SERVERPORT "8883"  // MQTTS(TLS 加密)
 #define CONFIG_APP_LIFETIME 60              ///< 心跳周期,秒
 
 #define CONFIG_QUEUE_TIMEOUT (5 * 1000)
@@ -318,7 +319,9 @@ static int task_main_entry(void) {
   connect_para.server_port = CONFIG_APP_SERVERPORT;
   connect_para.life_time = CONFIG_APP_LIFETIME;
   connect_para.rcvfunc = msg_rcv_callback;
-  connect_para.security.type = EN_DTLS_AL_SECURITY_TYPE_NONE;
+  connect_para.security.type = EN_DTLS_AL_SECURITY_TYPE_CERT;
+  connect_para.security.u.cert.server_ca = (uint8_t *)g_iotda_server_ca;
+  connect_para.security.u.cert.server_ca_len = (int)sizeof(g_iotda_server_ca);
   ret = oc_mqtt_profile_connect(&connect_para);
   if ((ret == (int)en_oc_mqtt_err_ok)) {
     g_app_cb.connected = 1;
