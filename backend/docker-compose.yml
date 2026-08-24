@@ -1,0 +1,47 @@
+# 智慧路灯后端一键部署:PostgreSQL + Rust 后端
+#
+# 本地(WSL):cd backend && docker compose up -d --build
+# 云服务器:同一份文件直接可用 —— 把 .env 复制过去填好华为云配置即可;
+#           建议去掉 postgres 的 ports 映射(不对外暴露数据库),用安全组放行 8080。
+#
+# 数据卷复用历史卷 streetlight-pgdata(原 infra-up.sh 创建),已注册设备等数据不丢。
+# 后端环境变量来自 .env(env_file),其中 DATABASE_URL 被下方 environment 覆盖为
+# compose 内部服务名;本地 cargo run 直连时仍用 .env 里的 127.0.0.1,互不干扰。
+
+name: streetlight
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: streetlight-postgres
+    environment:
+      POSTGRES_DB: streetlight
+      POSTGRES_USER: streetlight
+      POSTGRES_PASSWORD: streetlight
+    ports:
+      - "5432:5432" # 云部署时删除本映射
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U streetlight -d streetlight"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  backend:
+    build: .
+    container_name: streetlight-backend
+    env_file: .env # HUAWEI_AK/SK、HUAWEI_PROJECT_ID、HUAWEI_IOTDA_ENDPOINT/REGION
+    environment:
+      DATABASE_URL: postgres://streetlight:streetlight@postgres:5432/streetlight
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+    name: streetlight-pgdata
