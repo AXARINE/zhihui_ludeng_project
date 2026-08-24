@@ -1,8 +1,11 @@
+use futures::StreamExt;
 use hmac::{Hmac, KeyInit, Mac};
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::api::LampAction;
 use crate::AppState;
 
 type HmacSha256 = Hmac<Sha256>;
@@ -30,32 +33,89 @@ pub struct IothubClient {
     http: reqwest::Client,
 }
 
+/// Light 服务上报的属性(产品模型:`Luminance` int + `LightStatus` string)
 #[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct ShadowProps {
+    pub luminance: Option<i32>,
     pub light_status: Option<String>,
-    pub luminance: Option<i64>,
+}
+
+/// 设备在线状态(`IoTDA` 返回 "ONLINE"/"OFFLINE",其余归 Unknown)
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum OnlineStatus {
+    Online,
+    Offline,
+    #[serde(other)]
+    Unknown,
+}
+
+impl OnlineStatus {
+    #[must_use]
+    pub const fn is_online(self) -> bool {
+        matches!(self, Self::Online)
+    }
+}
+
+/// 设备影子响应的类型化视图(只关心 Light 服务的 reported properties)
+#[derive(serde::Deserialize)]
+struct ShadowResponse {
+    shadow: Vec<ShadowService>,
+}
+
+#[derive(serde::Deserialize)]
+struct ShadowService {
+    service_id: String,
+    reported: Reported,
+}
+
+#[derive(serde::Deserialize)]
+struct Reported {
+    properties: ShadowProps,
+}
+
+#[derive(serde::Deserialize)]
+struct DeviceInfo {
+    status: OnlineStatus,
+}
+
+/// 非 2xx 时把状态码与响应体(华为云错误信息在 body 里)带进错误
+async fn ensure_success(resp: reqwest::Response) -> anyhow::Result<reqwest::Response> {
+    if resp.status().is_success() {
+        return Ok(resp);
+    }
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+    anyhow::bail!("{status}: {}", body.trim());
 }
 
 impl IothubClient {
     pub fn from_env() -> anyhow::Result<Option<Arc<Self>>> {
-        let get = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
-        let (Some(ak), Some(sk), Some(project_id), Some(endpoint)) = (
-            get("HUAWEI_AK"),
-            get("HUAWEI_SK"),
-            get("HUAWEI_PROJECT_ID"),
-            get("HUAWEI_IOTDA_ENDPOINT"),
-        ) else {
+        fn env_var(key: &str) -> Option<String> {
+            std::env::var(key).ok().filter(|v| !v.is_empty())
+        }
+        // Option 的 collect 语义:任一变量缺失即整体短路为 None
+        let Some(cfg) = [
+            "HUAWEI_AK",
+            "HUAWEI_SK",
+            "HUAWEI_PROJECT_ID",
+            "HUAWEI_IOTDA_ENDPOINT",
+        ]
+        .into_iter()
+        .map(env_var)
+        .collect::<Option<Vec<_>>>()
+        else {
             tracing::warn!("HUAWEI_* 环境变量未配置,IoTDA 北向功能停用");
             return Ok(None);
         };
+        let [ak, sk, project_id, endpoint] = <[String; 4]>::try_from(cfg).expect("statically 4 keys");
         let endpoint = endpoint
             .trim_start_matches("https://")
             .trim_end_matches('/')
             .to_string();
         // V11 衍生签名需要区域名:优先 HUAWEI_IOTDA_REGION,否则从域名推断(如 cn-south-1)
-        let region = std::env::var("HUAWEI_IOTDA_REGION")
-            .ok()
-            .filter(|v| !v.is_empty())
+        let region = env_var("HUAWEI_IOTDA_REGION")
             .or_else(|| {
                 endpoint
                     .split('.')
@@ -129,105 +189,80 @@ impl IothubClient {
         )
     }
 
-    fn signed_headers(&self, method: &str, path: &str, body: &str) -> [(&'static str, String); 4] {
+    fn signed_headers(&self, method: &str, path: &str, body: &str) -> HeaderMap {
         let sdk_date = chrono::Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
         let uri = self.path_of(path);
         let auth = self.sign(method, &uri, &sdk_date, body);
+        let value = |v: &str| HeaderValue::from_str(v).expect("valid header value");
         [
-            ("content-type", "application/json".to_string()),
-            ("host", self.host().to_string()),
-            ("x-sdk-date", sdk_date),
-            ("authorization", auth),
+            (
+                reqwest::header::CONTENT_TYPE,
+                HeaderValue::from_static("application/json"),
+            ),
+            (reqwest::header::HOST, value(self.host())),
+            (HeaderName::from_static("x-sdk-date"), value(&sdk_date)),
+            (reqwest::header::AUTHORIZATION, value(&auth)),
         ]
-    }
-
-    async fn get(&self, path: &str) -> anyhow::Result<reqwest::Response> {
-        let [ct, host, date, auth] = self.signed_headers("GET", path, "");
-        let url = format!("https://{}{}", self.host(), self.path_of(path));
-        let resp = self
-            .http
-            .get(url)
-            .header(ct.0, ct.1)
-            .header(host.0, host.1)
-            .header(date.0, date.1)
-            .header(auth.0, auth.1)
-            .send()
-            .await?;
-        Ok(resp)
+        .into_iter()
+        .collect()
     }
 
     async fn request(
         &self,
         method: reqwest::Method,
         path: &str,
-        body: serde_json::Value,
+        body: Option<serde_json::Value>,
     ) -> anyhow::Result<reqwest::Response> {
-        let raw = body.to_string();
-        let [ct, host, date, auth] = self.signed_headers(method.as_str(), path, &raw);
+        let raw = body.map(|b| b.to_string());
+        let headers = self.signed_headers(method.as_str(), path, raw.as_deref().unwrap_or_default());
         let url = format!("https://{}{}", self.host(), self.path_of(path));
-        let resp = self
-            .http
-            .request(method, url)
-            .header(ct.0, ct.1)
-            .header(host.0, host.1)
-            .header(date.0, date.1)
-            .header(auth.0, auth.1)
-            .body(raw)
-            .send()
-            .await?;
-        Ok(resp)
+        let req = self.http.request(method, url).headers(headers);
+        let req = match raw {
+            Some(raw) => req.body(raw),
+            None => req,
+        };
+        ensure_success(req.send().await?).await
     }
 
     /// 查询设备影子,返回 Light 服务上报的属性
     pub async fn shadow(&self, device_id: &str) -> anyhow::Result<Option<ShadowProps>> {
-        let resp = self.get(&format!("/devices/{device_id}/shadow")).await?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("shadow query failed: {status}: {}", body.trim());
-        }
-        let v: serde_json::Value = resp.json().await?;
-        let props = v["shadow"]
-            .as_array()
-            .and_then(|arr| arr.iter().find(|s| s["service_id"] == "Light"))
-            .map(|s| &s["reported"]["properties"]);
-        Ok(props.map(|p| ShadowProps {
-            luminance: p["Luminance"].as_i64(),
-            light_status: p["LightStatus"].as_str().map(String::from),
-        }))
+        let resp = self
+            .request(
+                reqwest::Method::GET,
+                &format!("/devices/{device_id}/shadow"),
+                None,
+            )
+            .await?;
+        Ok(resp
+            .json::<ShadowResponse>()
+            .await?
+            .shadow
+            .into_iter()
+            .find(|s| s.service_id == "Light")
+            .map(|s| s.reported.properties))
     }
 
-    /// 查询设备在线状态,返回 "ONLINE" / "OFFLINE" 等
-    pub async fn device_status(&self, device_id: &str) -> anyhow::Result<String> {
-        let resp = self.get(&format!("/devices/{device_id}")).await?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("device query failed: {status}: {}", body.trim());
-        }
-        let v: serde_json::Value = resp.json().await?;
-        Ok(v["status"].as_str().unwrap_or("UNKNOWN").to_string())
+    /// 查询设备在线状态
+    pub async fn device_status(&self, device_id: &str) -> anyhow::Result<OnlineStatus> {
+        let resp = self
+            .request(reqwest::Method::GET, &format!("/devices/{device_id}"), None)
+            .await?;
+        Ok(resp.json::<DeviceInfo>().await?.status)
     }
 
-    /// 下发 `Light_Control_Led` 命令(Led: ON/OFF/AUTO)
-    pub async fn control_led(&self, device_id: &str, led: &str) -> anyhow::Result<()> {
+    /// 下发 `Light_Control_Led` 命令
+    pub async fn control_led(&self, device_id: &str, action: LampAction) -> anyhow::Result<()> {
         let body = serde_json::json!({
             "service_id": "Light",
             "command_name": "Light_Control_Led",
-            "paras": { "Led": led }
+            "paras": { "Led": action.as_iotda_str() }
         });
-        let resp = self
-            .request(
-                reqwest::Method::POST,
-                &format!("/devices/{device_id}/commands"),
-                body,
-            )
-            .await?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("command failed: {status}: {}", body.trim());
-        }
+        self.request(
+            reqwest::Method::POST,
+            &format!("/devices/{device_id}/commands"),
+            Some(body),
+        )
+        .await?;
         Ok(())
     }
 
@@ -239,39 +274,42 @@ impl IothubClient {
                 "properties": { "Threshold": threshold }
             }]
         });
-        let resp = self
-            .request(
-                reqwest::Method::PUT,
-                &format!("/devices/{device_id}/properties"),
-                body,
-            )
-            .await?;
-        if !resp.status().is_success() {
-            let status = resp.status();
-            let body = resp.text().await.unwrap_or_default();
-            anyhow::bail!("set properties failed: {status}: {}", body.trim());
-        }
+        self.request(
+            reqwest::Method::PUT,
+            &format!("/devices/{device_id}/properties"),
+            Some(body),
+        )
+        .await?;
         Ok(())
     }
 }
 
-/// 轮询任务:周期性拉设备影子/状态入库
+/// 轮询任务:周期性并发拉取各设备影子/状态入库
 pub async fn run(state: Arc<AppState>, iothub: Arc<IothubClient>) {
     let mut ticker = tokio::time::interval(Duration::from_secs(8));
     loop {
         ticker.tick().await;
-        let devices: Vec<(String,)> = match sqlx::query_as("SELECT id FROM device").fetch_all(&state.db).await {
+        let devices: Vec<(String,)> = match sqlx::query_as("SELECT id FROM device")
+            .fetch_all(&state.db)
+            .await
+        {
             Ok(d) => d,
             Err(e) => {
                 tracing::error!("list devices failed: {e}");
                 continue;
             }
         };
-        for (device_id,) in devices {
-            if let Err(e) = poll_device(&state, &iothub, &device_id).await {
-                tracing::warn!("poll {device_id} failed: {e}");
-            }
-        }
+        futures::stream::iter(devices)
+            .for_each_concurrent(None, |(device_id,)| {
+                let state = &state;
+                let iothub = &iothub;
+                async move {
+                    if let Err(e) = poll_device(state, iothub, &device_id).await {
+                        tracing::warn!("poll {device_id} failed: {e}");
+                    }
+                }
+            })
+            .await;
     }
 }
 
@@ -281,8 +319,7 @@ async fn poll_device(
     device_id: &str,
 ) -> anyhow::Result<()> {
     // 先查在线状态:离线时影子保留最后上报值,不能直接当实时数据入库
-    let status = iothub.device_status(device_id).await?;
-    let online = status == "ONLINE";
+    let online = iothub.device_status(device_id).await?.is_online();
 
     // 在线状态变化 → 告警产生/消解
     let changed: Option<(String,)> = sqlx::query_as(
@@ -324,7 +361,7 @@ async fn poll_device(
         if let Some(lux) = props.luminance {
             sqlx::query("INSERT INTO lux_record (device_id, lux) VALUES ($1, $2)")
                 .bind(device_id)
-                .bind(lux as i32)
+                .bind(lux)
                 .execute(&state.db)
                 .await?;
         }

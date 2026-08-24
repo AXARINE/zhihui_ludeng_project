@@ -1,31 +1,71 @@
 use crate::AppState;
-use axum::{
-    extract::{Path, Query, State},
-    http::StatusCode,
-    Json, Router,
-};
+use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
-use serde::Deserialize;
+use axum::{Json, Router};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::sync::Arc;
 
-type ApiResult<T> = Result<T, (StatusCode, String)>;
-
-fn err500<E: std::fmt::Display>(e: E) -> (StatusCode, String) {
-    (StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+/// API 统一错误:`IntoResponse` 映射为 (status, message),handler 全程 `?` 组合
+#[derive(Debug, thiserror::Error)]
+enum Error {
+    #[error("database error: {0}")]
+    Db(#[from] sqlx::Error),
+    #[error("IoTDA 北向调用失败: {0}")]
+    Iothub(#[from] anyhow::Error),
+    #[error("{0}")]
+    BadRequest(String),
+    #[error("IoTDA 北向未配置(HUAWEI_* 环境变量缺失)")]
+    IothubUnavailable,
 }
 
-fn bad_req(msg: &str) -> (StatusCode, String) {
-    (StatusCode::BAD_REQUEST, msg.to_string())
+impl IntoResponse for Error {
+    fn into_response(self) -> Response {
+        let status = match &self {
+            Self::Db(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::Iothub(_) => StatusCode::BAD_GATEWAY,
+            Self::BadRequest(_) => StatusCode::BAD_REQUEST,
+            Self::IothubUnavailable => StatusCode::SERVICE_UNAVAILABLE,
+        };
+        (status, self.to_string()).into_response()
+    }
 }
 
-fn no_iothub() -> (StatusCode, String) {
-    (
-        StatusCode::SERVICE_UNAVAILABLE,
-        "IoTDA 北向未配置(HUAWEI_* 环境变量缺失)".to_string(),
-    )
+/// 灯控动作:serde 按小写反序列化(on/off/auto),非法值由 axum 直接拒收
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LampAction {
+    On,
+    Off,
+    Auto,
 }
 
-#[derive(serde::Serialize, sqlx::FromRow)]
+impl LampAction {
+    /// `IoTDA` 命令参数取值(大写)
+    #[must_use]
+    pub const fn as_iotda_str(self) -> &'static str {
+        match self {
+            Self::On => "ON",
+            Self::Off => "OFF",
+            Self::Auto => "AUTO",
+        }
+    }
+}
+
+impl fmt::Display for LampAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Self::On => "on",
+            Self::Off => "off",
+            Self::Auto => "auto",
+        })
+    }
+}
+
+#[derive(Serialize, sqlx::FromRow)]
 struct Device {
     id: String,
     name: String,
@@ -33,29 +73,29 @@ struct Device {
     status: String,
     lamp: String,
     mode: String,
-    last_seen_at: Option<chrono::DateTime<chrono::Utc>>,
-    created_at: chrono::DateTime<chrono::Utc>,
+    last_seen_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
 }
 
-#[derive(serde::Serialize, sqlx::FromRow)]
+#[derive(Serialize, sqlx::FromRow)]
 struct LuxRecord {
     id: i64,
     device_id: String,
     lux: i32,
-    created_at: chrono::DateTime<chrono::Utc>,
+    created_at: DateTime<Utc>,
 }
 
-#[derive(serde::Serialize, sqlx::FromRow)]
+#[derive(Serialize, sqlx::FromRow)]
 struct Alarm {
     id: i64,
     device_id: String,
     r#type: String,
     message: String,
-    created_at: chrono::DateTime<chrono::Utc>,
-    resolved_at: Option<chrono::DateTime<chrono::Utc>>,
+    created_at: DateTime<Utc>,
+    resolved_at: Option<DateTime<Utc>>,
 }
 
-#[derive(serde::Serialize, sqlx::FromRow)]
+#[derive(Serialize, sqlx::FromRow)]
 struct CommandRecord {
     id: i64,
     device_id: String,
@@ -63,7 +103,7 @@ struct CommandRecord {
     source: String,
     status: String,
     message: String,
-    created_at: chrono::DateTime<chrono::Utc>,
+    created_at: DateTime<Utc>,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
@@ -82,13 +122,12 @@ pub fn router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-async fn list_devices(State(s): State<Arc<AppState>>) -> ApiResult<Json<Vec<Device>>> {
+async fn list_devices(State(s): State<Arc<AppState>>) -> Result<Json<Vec<Device>>, Error> {
     let rows = sqlx::query_as::<_, Device>(
         "SELECT id, name, location, status, lamp, mode, last_seen_at, created_at FROM device ORDER BY created_at",
     )
     .fetch_all(&s.db)
-    .await
-    .map_err(err500)?;
+    .await?;
     Ok(Json(rows))
 }
 
@@ -102,44 +141,46 @@ struct CreateDevice {
 async fn create_device(
     State(s): State<Arc<AppState>>,
     Json(body): Json<CreateDevice>,
-) -> ApiResult<StatusCode> {
+) -> Result<StatusCode, Error> {
     sqlx::query("INSERT INTO device (id, name, location) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING")
         .bind(&body.id)
         .bind(body.name.unwrap_or_else(|| body.id.clone()))
         .bind(body.location.unwrap_or_default())
         .execute(&s.db)
-        .await
-        .map_err(err500)?;
+        .await?;
     Ok(StatusCode::CREATED)
 }
 
-async fn delete_device(State(s): State<Arc<AppState>>, Path(id): Path<String>) -> ApiResult<StatusCode> {
-    // sqlx 0.9 起 query() 要求 SqlSafeStr(拒收动态 String);表名/列名来自这里的静态白名单
-    for (table, col) in [
-        ("device", "id"),
-        ("config", "device_id"),
-        ("lux_record", "device_id"),
-        ("alarm", "device_id"),
-    ] {
-        let mut qb = sqlx::QueryBuilder::new("DELETE FROM ");
-        qb.push(table).push(" WHERE ").push(col).push(" = ").push_bind(&id);
-        qb.build().execute(&s.db).await.map_err(err500)?;
-    }
+async fn delete_device(
+    State(s): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<StatusCode, Error> {
+    // 静态 SQL 白名单(sqlx 0.9 起 query() 要求 SqlSafeStr,拒收动态 String)
+    futures::future::try_join_all(
+        [
+            "DELETE FROM device WHERE id = $1",
+            "DELETE FROM config WHERE device_id = $1",
+            "DELETE FROM lux_record WHERE device_id = $1",
+            "DELETE FROM alarm WHERE device_id = $1",
+        ]
+        .into_iter()
+        .map(|sql| sqlx::query(sql).bind(&id).execute(&s.db)),
+    )
+    .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
 async fn lux_latest(
     State(s): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> ApiResult<Json<Option<LuxRecord>>> {
+) -> Result<Json<Option<LuxRecord>>, Error> {
     let row = sqlx::query_as::<_, LuxRecord>(
         "SELECT id, device_id, lux, created_at FROM lux_record \
          WHERE device_id = $1 ORDER BY created_at DESC LIMIT 1",
     )
     .bind(&id)
     .fetch_optional(&s.db)
-    .await
-    .map_err(err500)?;
+    .await?;
     Ok(Json(row))
 }
 
@@ -149,96 +190,97 @@ struct HistoryQuery {
     to: Option<String>,
 }
 
+fn parse_ts(param: &str, raw: &str) -> Result<DateTime<Utc>, Error> {
+    DateTime::parse_from_rfc3339(raw)
+        .map(|dt| dt.with_timezone(&Utc))
+        .map_err(|_| Error::BadRequest(format!("bad {param}")))
+}
+
 async fn lux_history(
     State(s): State<Arc<AppState>>,
     Path(id): Path<String>,
     Query(q): Query<HistoryQuery>,
-) -> ApiResult<Json<Vec<LuxRecord>>> {
+) -> Result<Json<Vec<LuxRecord>>, Error> {
+    let from = q.from.as_deref().map(|v| parse_ts("from", v)).transpose()?;
+    let to = q.to.as_deref().map(|v| parse_ts("to", v)).transpose()?;
     let mut qb = sqlx::QueryBuilder::new(
         "SELECT id, device_id, lux, created_at FROM lux_record WHERE device_id = ",
     );
     qb.push_bind(id);
-    if let Some(from) = q.from {
-        let from = chrono::DateTime::parse_from_rfc3339(&from).map_err(|_| bad_req("bad from"))?;
-        qb.push(" AND created_at >= ").push_bind(from.with_timezone(&chrono::Utc));
+    if let Some(from) = from {
+        qb.push(" AND created_at >= ").push_bind(from);
     }
-    if let Some(to) = q.to {
-        let to = chrono::DateTime::parse_from_rfc3339(&to).map_err(|_| bad_req("bad to"))?;
-        qb.push(" AND created_at <= ").push_bind(to.with_timezone(&chrono::Utc));
+    if let Some(to) = to {
+        qb.push(" AND created_at <= ").push_bind(to);
     }
     qb.push(" ORDER BY created_at DESC LIMIT 5000");
-    let rows = qb
-        .build_query_as::<LuxRecord>()
-        .fetch_all(&s.db)
-        .await
-        .map_err(err500)?;
+    let rows = qb.build_query_as::<LuxRecord>().fetch_all(&s.db).await?;
     Ok(Json(rows))
 }
 
 #[derive(Deserialize)]
-struct LampAction {
-    action: String,
+struct LampBody {
+    action: LampAction,
 }
 
 async fn set_lamp(
     State(s): State<Arc<AppState>>,
     Path(id): Path<String>,
-    Json(body): Json<LampAction>,
-) -> ApiResult<StatusCode> {
-    let led = match body.action.as_str() {
-        "on" => "ON",
-        "off" => "OFF",
-        "auto" => "AUTO",
-        _ => return Err(bad_req("action must be on|off|auto")),
-    };
-    let hub = s.iothub.as_ref().ok_or_else(no_iothub)?;
+    Json(body): Json<LampBody>,
+) -> Result<StatusCode, Error> {
+    let hub = s.iothub.as_ref().ok_or(Error::IothubUnavailable)?;
     // 指令留痕:北向接受记 sent,失败记 failed(固件执行结果不回传,无法追踪)
-    let result = hub.control_led(&id, led).await;
-    let (status, message) = match &result {
-        Ok(()) => ("sent", String::new()),
-        Err(e) => ("failed", e.to_string()),
-    };
+    let result = hub.control_led(&id, body.action).await;
+    let (status, message) = result
+        .as_ref()
+        .map_or_else(|e| ("failed", e.to_string()), |()| ("sent", String::new()));
     sqlx::query(
         "INSERT INTO command_record (device_id, action, source, status, message) \
          VALUES ($1, $2, 'manual', $3, $4)",
     )
     .bind(&id)
-    .bind(&body.action)
+    .bind(body.action.to_string())
     .bind(status)
     .bind(message)
     .execute(&s.db)
-    .await
-    .map_err(err500)?;
-    result.map_err(err500)?;
+    .await?;
+    result?;
     Ok(StatusCode::ACCEPTED)
 }
 
 async fn list_commands(
     State(s): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> ApiResult<Json<Vec<CommandRecord>>> {
+) -> Result<Json<Vec<CommandRecord>>, Error> {
     let rows = sqlx::query_as::<_, CommandRecord>(
         "SELECT id, device_id, action, source, status, message, created_at \
          FROM command_record WHERE device_id = $1 ORDER BY created_at DESC LIMIT 500",
     )
     .bind(&id)
     .fetch_all(&s.db)
-    .await
-    .map_err(err500)?;
+    .await?;
     Ok(Json(rows))
+}
+
+#[derive(Serialize)]
+struct ThresholdResponse {
+    device_id: String,
+    threshold: i32,
 }
 
 async fn get_threshold(
     State(s): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> ApiResult<Json<serde_json::Value>> {
-    let row: Option<(i32,)> = sqlx::query_as("SELECT threshold FROM config WHERE device_id = $1")
+) -> Result<Json<ThresholdResponse>, Error> {
+    let threshold = sqlx::query_scalar::<_, i32>("SELECT threshold FROM config WHERE device_id = $1")
         .bind(&id)
         .fetch_optional(&s.db)
-        .await
-        .map_err(err500)?;
-    let threshold = row.map_or(40, |r| r.0);
-    Ok(Json(serde_json::json!({ "device_id": id, "threshold": threshold })))
+        .await?
+        .unwrap_or(40);
+    Ok(Json(ThresholdResponse {
+        device_id: id,
+        threshold,
+    }))
 }
 
 #[derive(Deserialize)]
@@ -250,7 +292,7 @@ async fn put_threshold(
     State(s): State<Arc<AppState>>,
     Path(id): Path<String>,
     Json(body): Json<ThresholdBody>,
-) -> ApiResult<StatusCode> {
+) -> Result<StatusCode, Error> {
     sqlx::query(
         "INSERT INTO config (device_id, threshold) VALUES ($1, $2) \
          ON CONFLICT (device_id) DO UPDATE SET threshold = $2",
@@ -258,10 +300,9 @@ async fn put_threshold(
     .bind(&id)
     .bind(body.threshold)
     .execute(&s.db)
-    .await
-    .map_err(err500)?;
-    let hub = s.iothub.as_ref().ok_or_else(no_iothub)?;
-    hub.set_threshold(&id, body.threshold).await.map_err(err500)?;
+    .await?;
+    let hub = s.iothub.as_ref().ok_or(Error::IothubUnavailable)?;
+    hub.set_threshold(&id, body.threshold).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -274,7 +315,7 @@ struct AlarmQuery {
 async fn list_alarms(
     State(s): State<Arc<AppState>>,
     Query(q): Query<AlarmQuery>,
-) -> ApiResult<Json<Vec<Alarm>>> {
+) -> Result<Json<Vec<Alarm>>, Error> {
     let mut qb = sqlx::QueryBuilder::new(
         "SELECT id, device_id, type, message, created_at, resolved_at FROM alarm WHERE 1=1",
     );
@@ -289,10 +330,6 @@ async fn list_alarms(
         });
     }
     qb.push(" ORDER BY created_at DESC LIMIT 500");
-    let rows = qb
-        .build_query_as::<Alarm>()
-        .fetch_all(&s.db)
-        .await
-        .map_err(err500)?;
+    let rows = qb.build_query_as::<Alarm>().fetch_all(&s.db).await?;
     Ok(Json(rows))
 }
