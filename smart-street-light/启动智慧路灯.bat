@@ -12,15 +12,20 @@ echo    智慧路灯系统 一键启动
 echo ==========================================
 echo.
 
-rem ---------- [1/3] 启动 MySQL ----------
-rem 若本机存在绿色版 D:\mysql，则自动启动；否则默认已装 MySQL 服务并自行运行
-if exist "D:\mysql\bin\mysqld.exe" (
-    echo [1/3] 启动 MySQL 数据库 ...
-    start "MySQL" /min "D:\mysql\bin\mysqld.exe" --defaults-file=D:\mysql\my.ini
+rem ---------- [1/3] 启动 PostgreSQL ----------
+rem 若本机存在绿色版 D:\pgsql，则自动启动；否则请确认已装 PostgreSQL 并自行启动
+if exist "D:\pgsql\pgsql\bin\pg_ctl.exe" (
+    "D:\pgsql\pgsql\bin\pg_ctl.exe" -D "D:\pgsql\data" status >nul 2>nul
+    if errorlevel 1 (
+        echo [1/3] 启动 PostgreSQL ...
+        "D:\pgsql\pgsql\bin\pg_ctl.exe" -D "D:\pgsql\data" -l "D:\pgsql\logfile.txt" -w start
+    ) else (
+        echo [1/3] PostgreSQL 已在运行 ...
+    )
 ) else (
-    echo [1/3] 使用本机已安装的 MySQL（请确认其服务已启动）...
+    echo [1/3] 未找到 PostgreSQL，请确认已安装并启动（默认 127.0.0.1:5432）...
 )
-timeout /t 3 /nobreak >nul
+timeout /t 1 /nobreak >nul
 
 rem ---------- [2/3] 自动检测 Python ----------
 set "PYTHON="
@@ -39,7 +44,7 @@ rem 结束占用 8000 端口的旧后端，避免端口冲突导致旧代码继�
 for /f "tokens=5" %%a in ('netstat -ano ^| findstr :8000 ^| findstr LISTENING') do taskkill /F /PID %%a >nul 2>nul
 
 echo [2/3] 启动后端服务 ...
-start "智慧路灯后端" /min "%PYTHON%" -m uvicorn main:app --app-dir "%~dp0backend" --host 127.0.0.1 --port 8000
+start "智慧路灯后端" /min "%PYTHON%" -m uvicorn main:app --app-dir "%~dp0backend" --host 0.0.0.0 --port 8000
 timeout /t 4 /nobreak >nul
 
 rem ---------- [3/3] 打开管理页面 ----------

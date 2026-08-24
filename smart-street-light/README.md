@@ -2,7 +2,7 @@
 
 基于 **BearPi-HM Nano + E53_SC1** 的智慧路灯物联网项目。本仓库包含：
 
-- 数据库设计（MySQL 8.0，含 RBAC 权限）
+- 数据库设计（PostgreSQL，含 RBAC 权限）
 - FastAPI 后端（账号管理 + 数据采集 + 设备管理）
 - 管理页面（中文 Web 界面）
 - 一键启动脚本
@@ -10,10 +10,9 @@
 ## 目录结构
 
 ```
-├── smart_street_light.sql          # 建库脚本（含 CREATE DATABASE，直接导入即可）
+├── smart_street_light.sql          # 建库脚本（PostgreSQL，先建库再导入）
 ├── 启动智慧路灯.bat                 # 一键启动（自动检测 Python）
 ├── 04_智慧路灯_基本功能清单.md        # 功能清单（参考）
-├── smart_street_light_运行状态.html  # 运行状态快照
 └── backend/
     ├── main.py                     # FastAPI 后端
     ├── requirements.txt            # 依赖
@@ -25,19 +24,23 @@
 ## 环境要求
 
 - Python 3.11+（安装时勾选 **Add Python to PATH**）
-- MySQL 8.0（5.7+ 亦可）
+- PostgreSQL 12+
 
 ## 快速开始
 
 ### 1. 导入数据库
 
-确保 MySQL 已启动，然后执行（会提示输入 root 密码）：
+确保 PostgreSQL 已启动，先创建数据库（以超级用户 postgres 执行一次）：
 
 ```bash
-mysql -u root -p < smart_street_light.sql
+psql -U postgres -c "CREATE DATABASE smart_street_light;"
 ```
 
-脚本会自动创建 `smart_street_light` 库并建好 9 张表（含角色/权限种子数据）。
+再导入建表脚本（含 10 张表 + 角色/权限/知识库种子数据）：
+
+```bash
+psql -U postgres -d smart_street_light -f smart_street_light.sql
+```
 
 ### 2. 安装依赖
 
@@ -64,7 +67,7 @@ uvicorn main:app --host 127.0.0.1 --port 8000
 
 ## 数据库密码不同怎么办？
 
-后端默认连 `root / 123456`。如果你的 MySQL 密码不同，**无需改代码**，启动前设置环境变量覆盖即可：
+后端默认连 `postgres / 123456`。如果你的 PostgreSQL 密码不同，**无需改代码**，启动前设置环境变量覆盖即可：
 
 **cmd：**
 ```cmd

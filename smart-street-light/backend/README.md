@@ -4,7 +4,7 @@ FastAPI 后端，负责**账号管理**（市政人员 / 路灯管理员增删�
 
 ## 环境
 
-- Python 3.12 + MySQL 8.0.40（本地 `smart_street_light` 库，root/123456）
+- Python 3.12 + PostgreSQL 12+（本地 `smart_street_light` 库，postgres/123456）
 
 ## 安装依赖
 

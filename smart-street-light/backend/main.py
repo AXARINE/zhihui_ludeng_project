@@ -15,7 +15,8 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 
 import bcrypt
-import pymysql
+import psycopg2
+import psycopg2.extras
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -23,19 +24,16 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 # ---------------- 数据库配置 ----------------
-# 默认值适配团队共同开发环境（root/123456）。
-# 队友的 MySQL 密码或地址不同时，无需改代码，用环境变量覆盖即可，例如：
+# 默认值适配团队共同开发环境（postgres/123456）。
+# 队友的 PostgreSQL 密码或地址不同时，无需改代码，用环境变量覆盖即可，例如：
 #   set DB_PASSWORD=你的密码        (Windows cmd)
 #   $env:DB_PASSWORD="你的密码"     (PowerShell)
 DB_CONFIG = {
     "host": os.getenv("DB_HOST", "127.0.0.1"),
-    "port": int(os.getenv("DB_PORT", "3306")),
-    "user": os.getenv("DB_USER", "root"),
+    "port": int(os.getenv("DB_PORT", "5432")),
+    "user": os.getenv("DB_USER", "postgres"),
     "password": os.getenv("DB_PASSWORD", "123456"),
-    "database": os.getenv("DB_NAME", "smart_street_light"),
-    "charset": "utf8mb4",
-    "cursorclass": pymysql.cursors.DictCursor,
-    "autocommit": True,
+    "dbname": os.getenv("DB_NAME", "smart_street_light"),
 }
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -61,7 +59,8 @@ app.add_middleware(
 
 @contextmanager
 def get_conn():
-    conn = pymysql.connect(**DB_CONFIG)
+    conn = psycopg2.connect(**DB_CONFIG, cursor_factory=psycopg2.extras.RealDictCursor)
+    conn.autocommit = True
     try:
         yield conn
     finally:
@@ -188,7 +187,7 @@ def _auto_control(conn, device_id: str, luminance: float):
                 (device_id, action),
             )
             cur.execute(
-                "UPDATE device SET lamp_status=%s WHERE device_id=%s",
+                "UPDATE device SET lamp_status=%s, updated_at=CURRENT_TIMESTAMP WHERE device_id=%s",
                 (1 if action == "on" else 0, device_id),
             )
         return action, reason
@@ -221,7 +220,7 @@ def list_users():
                 """
                 SELECT u.id, u.username, u.real_name, u.role_id,
                        r.role_code, r.role_name, u.status, u.created_at
-                FROM user u JOIN role r ON r.id = u.role_id
+                FROM users u JOIN role r ON r.id = u.role_id
                 ORDER BY u.id
                 """
             )
@@ -235,15 +234,15 @@ def create_user(body: UserCreate):
             cur.execute("SELECT id FROM role WHERE id=%s", (body.role_id,))
             if cur.fetchone() is None:
                 raise HTTPException(status_code=400, detail="角色不存在")
-            cur.execute("SELECT id FROM user WHERE username=%s", (body.username,))
+            cur.execute("SELECT id FROM users WHERE username=%s", (body.username,))
             if cur.fetchone() is not None:
                 raise HTTPException(status_code=409, detail="用户名已存在")
             cur.execute(
-                "INSERT INTO user (username, password_hash, real_name, role_id, status) "
-                "VALUES (%s, %s, %s, %s, 1)",
+                "INSERT INTO users (username, password_hash, real_name, role_id, status) "
+                "VALUES (%s, %s, %s, %s, 1) RETURNING id",
                 (body.username, hash_password(body.password), body.real_name, body.role_id),
             )
-            new_id = cur.lastrowid
+            new_id = cur.fetchone()["id"]
     return {"id": new_id, "username": body.username, "role_id": body.role_id}
 
 
@@ -251,10 +250,10 @@ def create_user(body: UserCreate):
 def delete_user(user_id: int):
     with get_conn() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM user WHERE id=%s", (user_id,))
+            cur.execute("SELECT id FROM users WHERE id=%s", (user_id,))
             if cur.fetchone() is None:
                 raise HTTPException(status_code=404, detail="用户不存在")
-            cur.execute("DELETE FROM user WHERE id=%s", (user_id,))
+            cur.execute("DELETE FROM users WHERE id=%s", (user_id,))
     return {"deleted": user_id}
 
 
@@ -265,13 +264,9 @@ def report_luminance(body: LuminanceIn):
         _ensure_device(conn, body.device_id)
         with conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO luminance_data (device_id, luminance) VALUES (%s, %s)",
+                "INSERT INTO luminance_data (device_id, luminance) VALUES (%s, %s) "
+                "RETURNING id, device_id, luminance, created_at",
                 (body.device_id, body.luminance),
-            )
-            new_id = cur.lastrowid
-            cur.execute(
-                "SELECT id, device_id, luminance, created_at FROM luminance_data WHERE id=%s",
-                (new_id,),
             )
             row = cur.fetchone()
         # 实时联动：根据阈值自动判断开关灯
@@ -291,7 +286,7 @@ def report_heartbeat(body: HeartbeatIn):
             prev = cur.fetchone()
             was_online = prev is not None and prev["online_status"] == 1
             cur.execute(
-                "UPDATE device SET online_status=%s, last_heartbeat=NOW() WHERE device_id=%s",
+                "UPDATE device SET online_status=%s, last_heartbeat=CURRENT_TIMESTAMP, updated_at=CURRENT_TIMESTAMP WHERE device_id=%s",
                 (new_status, body.device_id),
             )
             # 在线 → 离线切换时，自动生成一条离线告警
@@ -316,14 +311,9 @@ def report_alarm(body: AlarmIn):
         with conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO alarm_record (device_id, alarm_type, message, status) "
-                "VALUES (%s, %s, %s, 0)",
+                "VALUES (%s, %s, %s, 0) "
+                "RETURNING id, device_id, alarm_type, message, status, created_at",
                 (body.device_id, body.alarm_type, body.message),
-            )
-            new_id = cur.lastrowid
-            cur.execute(
-                "SELECT id, device_id, alarm_type, message, status, created_at "
-                "FROM alarm_record WHERE id=%s",
-                (new_id,),
             )
             row = cur.fetchone()
     return row
@@ -341,9 +331,10 @@ def set_threshold(body: ThresholdIn):
             cur.execute(
                 "INSERT INTO threshold_config (device_id, low_threshold, high_threshold) "
                 "VALUES (%s, %s, %s) "
-                "ON DUPLICATE KEY UPDATE low_threshold=%s, high_threshold=%s",
-                (body.device_id, body.low_threshold, body.high_threshold,
-                 body.low_threshold, body.high_threshold),
+                "ON CONFLICT (device_id) DO UPDATE SET "
+                "low_threshold=EXCLUDED.low_threshold, high_threshold=EXCLUDED.high_threshold, "
+                "updated_at=CURRENT_TIMESTAMP",
+                (body.device_id, body.low_threshold, body.high_threshold),
             )
     return {
         "device_id": body.device_id,
@@ -381,7 +372,7 @@ def manual_control(body: ManualControlIn):
         _ensure_device(conn, body.device_id)
         with conn.cursor() as cur:
             cur.execute(
-                "UPDATE device SET lamp_status=%s WHERE device_id=%s",
+                "UPDATE device SET lamp_status=%s, updated_at=CURRENT_TIMESTAMP WHERE device_id=%s",
                 (1 if body.action == "on" else 0, body.device_id),
             )
             cur.execute(
@@ -416,14 +407,9 @@ def create_device(body: DeviceCreate):
             if cur.fetchone() is not None:
                 raise HTTPException(status_code=409, detail="设备ID已存在")
             cur.execute(
-                "INSERT INTO device (device_id, name, location, online_status) VALUES (%s, %s, %s, 0)",
+                "INSERT INTO device (device_id, name, location, online_status) VALUES (%s, %s, %s, 0) "
+                "RETURNING id, device_id, name, location, online_status, lamp_status, last_heartbeat, created_at",
                 (body.device_id, body.name, body.location),
-            )
-            new_id = cur.lastrowid
-            cur.execute(
-                "SELECT id, device_id, name, location, online_status, lamp_status, last_heartbeat, created_at "
-                "FROM device WHERE id=%s",
-                (new_id,),
             )
             row = cur.fetchone()
     return row
