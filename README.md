@@ -112,6 +112,109 @@ cargo run                   # 监听 8080,首次启动自动建表并创建引�
 
 注意:控灯/阈值是透传 IoTDA 北向的,设备离线时北向拒绝(返回 502 带原因);`sent` 仅表示北向已受理,不代表灯已动作。
 
+## 部署上线(云服务器)
+
+前提:已完成上方「快速开始」的固件烧录,并按「IoTDA 侧配置要点」在华为云创建好实例 / 产品模型 / 设备 / AK-SK。
+
+### 1. 安装 Docker
+
+```bash
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER   # 重新登录后生效
+docker compose version
+```
+
+### 2. 拉代码并配置 .env
+
+```bash
+git clone https://github.com/AXARINE/zhihui_ludeng_project.git
+cd zhihui_ludeng_project/backend
+cp .env.example .env
+vim .env
+```
+
+`.env` 关键项:
+
+```bash
+HUAWEI_AK=你的访问密钥
+HUAWEI_SK=你的密钥
+HUAWEI_PROJECT_ID=你的项目ID
+HUAWEI_IOTDA_ENDPOINT=xxx.st1.iotda-app.cn-south-1.myhuaweicloud.com
+HUAWEI_IOTDA_REGION=cn-south-1
+
+# 生产必改:用 `openssl rand -hex 32` 生成后填进来
+JWT_SECRET=<openssl rand -hex 32 的输出>
+
+# 首次启动自动创建的管理员(上线前就设成强密码)
+BOOTSTRAP_ADMIN_USERNAME=admin
+BOOTSTRAP_ADMIN_PASSWORD=你的强密码
+```
+
+### 3. 裁剪 docker-compose.yml(生产版)
+
+- 删除 `nocodb` 整个服务(它只是本地看数据用的);
+- 删除 postgres 的 `ports: "5432:5432"` 映射,数据库绝不对外;
+- 后端保留 `8080:8080`,之后由反向代理收敛到 443。
+
+### 4. 启动
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker logs -f streetlight-backend
+```
+
+看到 `database migrated` 与 `http listening on 0.0.0.0:8080 (Swagger UI: /docs)` 即成功;首次启动自动建表并创建引导管理员。
+
+### 5. HTTPS 反向代理(推荐 Caddy)
+
+```bash
+sudo apt install -y caddy
+```
+
+`/etc/caddy/Caddyfile`:
+
+```
+streetlight.example.com {
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+```bash
+sudo systemctl reload caddy
+```
+
+之后访问 `https://streetlight.example.com/docs`;安全组只放行 443。
+
+### 6. 上线加固
+
+- `JWT_SECRET` 必须替换为随机值,不要使用开发默认值;
+- `BOOTSTRAP_ADMIN_PASSWORD` 首次启动前设成强密码;上线后建议用 API 创建正式账号并删除默认 admin(后端暂无改密码接口);
+- 若前端与后端不同域名,CORS 目前为 `allow_origin(Any)`,生产应在 `backend/src/main.rs` 改成前端域名;同域(前端放 Caddy 后)则无需处理;
+- 云服务器安全组只放行 80/443,不放行 5432/8080。
+
+### 7. 验收清单
+
+| 检查项 | 方法 |
+|---|---|
+| 设备在线 | IoTDA 控制台设备状态 = 在线 |
+| 数据入库 | `/docs` → login → Authorize → `GET /api/dashboard`,`reports_24h` 在涨 |
+| 光照统计 | `GET /api/devices/{id}/lux/stats` |
+| 远程控灯 | `POST /api/devices/{id}/lamp` `{"action":"on"}`,补光灯亮 |
+| 离线告警 | 拔设备电 → 告警新增;重新上电 → 自动消解 |
+| 权限隔离 | 市政账号(`role_id:1`)建设备应返回 403 |
+
+### 8. 日常更新
+
+```bash
+cd zhihui_ludeng_project
+git pull
+cd backend
+docker compose up -d --build   # 新 migration 自动执行
+```
+
+固件更新:`./build.sh && ./flash.sh 4`。
+
 ## IoTDA 侧配置要点
 
 1. 创建**标准版实例**,在"实例 → 接入信息"记下**设备侧域名**(填固件,本项目使用 1883 明文 MQTT,不要用 8883,原因见"安全说明")和**应用侧域名**(填 `.env`);标准版没有区域共享域名。
