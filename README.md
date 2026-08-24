@@ -27,10 +27,10 @@ Hi3861 --Wi-Fi/MQTT(oc_mqtt)--> 华为云 IoTDA(标准版实例, cn-south-1)
 | 路径 | 内容 |
 |---|---|
 | `C3_e53_sc1_pls/` | 固件源码(基于官方 E53_SC1 + D9_iot_cloud_oc_light 样例) |
-| `server/backend/` | Rust 后端(axum + sqlx + reqwest,IoTDA 北向客户端) |
-| `server/infra-up.sh` | 启动 PostgreSQL(WSL 原生 docker) |
+| `backend/` | Rust 后端(axum + sqlx + reqwest,IoTDA 北向客户端)、`migrations/`(PostgreSQL 建库脚本,后端启动时自动执行)、`infra-up.sh`(启动 PostgreSQL,WSL 原生 docker) |
 | `build.sh` / `flash.sh` | Docker 一键编译 / 一键烧录 |
 | `gen-compdb.sh` | 重新生成 clangd 用的 compile_commands.json |
+| `bearpi-hm_nano/` | OpenHarmony 源码树(git submodule,指向 gitee 官方仓库;build.sh 自动把固件样例同步进去再编译) |
 | `bearpi-serial.ps1` | 串口日志查看脚本(Windows PowerShell) |
 | `tools/hiburn_windows/` | HiBurn 烧录工具(Windows 版) |
 
@@ -38,9 +38,9 @@ Hi3861 --Wi-Fi/MQTT(oc_mqtt)--> 华为云 IoTDA(标准版实例, cn-south-1)
 
 ### 1. 固件
 
-前置:WSL2 Ubuntu + Docker(镜像 `openharmony/openharmony-docker:0.0.3`)、OpenHarmony 源码树克隆到 `~/bearpi/bearpi-hm_nano`、`sample/BUILD.gn` 已启用 `"C3_e53_sc1_pls:e53_sc1_example"`。
+前置:WSL2 Ubuntu + Docker(镜像 `openharmony/openharmony-docker:0.0.3`)。本仓库用 **git submodule** 携带 OpenHarmony 源码树(`bearpi-hm_nano/`,gitee 官方仓库),克隆时加 `--recursive`(或克隆后 `git submodule update --init`);`sample/BUILD.gn` 的样例启用由 build.sh 自动处理。
 
-在 `C3_e53_sc1_pls/e53_sc1_example.c` 顶部填入你的配置(Wi-Fi、IoTDA 实例设备侧域名、设备 ID/密钥),然后:
+复制 `C3_e53_sc1_pls/include/app_config.example.h` 为 `app_config.h`,填入你的 Wi-Fi SSID/密码和 IoTDA 设备 ID/密钥(该文件被 .gitignore 忽略);IoTDA 实例设备侧域名改 `C3_e53_sc1_pls/e53_sc1_example.c` 顶部的 `CONFIG_APP_SERVERIP`。然后:
 
 ```bash
 ./build.sh        # 编译
@@ -53,8 +53,8 @@ Hi3861 --Wi-Fi/MQTT(oc_mqtt)--> 华为云 IoTDA(标准版实例, cn-south-1)
 ### 2. 后端
 
 ```bash
-server/infra-up.sh          # 启动 PostgreSQL
-cd server/backend
+backend/infra-up.sh         # 启动 PostgreSQL
+cd backend
 cp .env.example .env        # 填华为云 AK/SK、项目 ID、实例应用侧域名、区域
 cargo run                   # 监听 8080
 ```
@@ -67,6 +67,7 @@ REST API(端口 8080):
 | GET | `/api/devices/:id/lux/latest` | 实时光照 |
 | GET | `/api/devices/:id/lux/history?from=&to=` | 历史光照(RFC3339 时间) |
 | POST | `/api/devices/:id/lamp` | 控灯 `{"action":"on\|off\|auto"}` |
+| GET | `/api/devices/:id/commands` | 控制指令留痕(审计) |
 | GET/PUT | `/api/devices/:id/threshold` | 阈值查询/下发 |
 | GET | `/api/alarms?device_id=&resolved=` | 告警记录 |
 
@@ -94,4 +95,4 @@ REST API(端口 8080):
 ## 迭代流程
 
 固件:改 `C3_e53_sc1_pls/` → `./build.sh` → `./flash.sh 4` → RESET ×2 → 串口验证。
-后端:改 `server/backend/` → `cargo build` → curl 验证 REST API。
+后端:改 `backend/` → `cargo build` → curl 验证 REST API。

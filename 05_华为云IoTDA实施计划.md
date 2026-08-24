@@ -48,7 +48,7 @@ Hi3861 --MQTT(oc_mqtt,属性/命令)--> 华为云 IoTDA
   - 保留:50ms 采样循环、auto 模式本地阈值开关灯
 - 需用户提供:Wi-Fi SSID/密码、设备 ID、设备密钥(填入 `CONFIG_*` 宏)
 
-### 2. 后端改造(`server/backend/`)
+### 2. 后端改造(`backend/`)
 
 - 新增 `src/iothub.rs`:
   - AK/SK 签名(**标准版用 V11-HMAC-SHA256 衍生签名**,旧 SDK-HMAC-SHA256 会 401;基础版才用旧算法)

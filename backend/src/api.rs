@@ -29,6 +29,7 @@ fn no_iothub() -> (StatusCode, String) {
 struct Device {
     id: String,
     name: String,
+    location: String,
     status: String,
     lamp: String,
     mode: String,
@@ -49,8 +50,20 @@ struct Alarm {
     id: i64,
     device_id: String,
     r#type: String,
+    message: String,
     created_at: chrono::DateTime<chrono::Utc>,
     resolved_at: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+#[derive(serde::Serialize, sqlx::FromRow)]
+struct CommandRecord {
+    id: i64,
+    device_id: String,
+    action: String,
+    source: String,
+    status: String,
+    message: String,
+    created_at: chrono::DateTime<chrono::Utc>,
 }
 
 pub fn router(state: Arc<AppState>) -> Router {
@@ -60,6 +73,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/devices/{id}/lux/latest", get(lux_latest))
         .route("/api/devices/{id}/lux/history", get(lux_history))
         .route("/api/devices/{id}/lamp", post(set_lamp))
+        .route("/api/devices/{id}/commands", get(list_commands))
         .route(
             "/api/devices/{id}/threshold",
             get(get_threshold).put(put_threshold),
@@ -70,7 +84,7 @@ pub fn router(state: Arc<AppState>) -> Router {
 
 async fn list_devices(State(s): State<Arc<AppState>>) -> ApiResult<Json<Vec<Device>>> {
     let rows = sqlx::query_as::<_, Device>(
-        "SELECT id, name, status, lamp, mode, last_seen_at, created_at FROM device ORDER BY created_at",
+        "SELECT id, name, location, status, lamp, mode, last_seen_at, created_at FROM device ORDER BY created_at",
     )
     .fetch_all(&s.db)
     .await
@@ -82,15 +96,17 @@ async fn list_devices(State(s): State<Arc<AppState>>) -> ApiResult<Json<Vec<Devi
 struct CreateDevice {
     id: String,
     name: Option<String>,
+    location: Option<String>,
 }
 
 async fn create_device(
     State(s): State<Arc<AppState>>,
     Json(body): Json<CreateDevice>,
 ) -> ApiResult<StatusCode> {
-    sqlx::query("INSERT INTO device (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING")
+    sqlx::query("INSERT INTO device (id, name, location) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING")
         .bind(&body.id)
         .bind(body.name.unwrap_or_else(|| body.id.clone()))
+        .bind(body.location.unwrap_or_default())
         .execute(&s.db)
         .await
         .map_err(err500)?;
@@ -173,8 +189,40 @@ async fn set_lamp(
         _ => return Err(bad_req("action must be on|off|auto")),
     };
     let hub = s.iothub.as_ref().ok_or_else(no_iothub)?;
-    hub.control_led(&id, led).await.map_err(err500)?;
+    // 指令留痕:北向接受记 sent,失败记 failed(固件执行结果不回传,无法追踪)
+    let result = hub.control_led(&id, led).await;
+    let (status, message) = match &result {
+        Ok(()) => ("sent", String::new()),
+        Err(e) => ("failed", e.to_string()),
+    };
+    sqlx::query(
+        "INSERT INTO command_record (device_id, action, source, status, message) \
+         VALUES ($1, $2, 'manual', $3, $4)",
+    )
+    .bind(&id)
+    .bind(&body.action)
+    .bind(status)
+    .bind(message)
+    .execute(&s.db)
+    .await
+    .map_err(err500)?;
+    result.map_err(err500)?;
     Ok(StatusCode::ACCEPTED)
+}
+
+async fn list_commands(
+    State(s): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Vec<CommandRecord>>> {
+    let rows = sqlx::query_as::<_, CommandRecord>(
+        "SELECT id, device_id, action, source, status, message, created_at \
+         FROM command_record WHERE device_id = $1 ORDER BY created_at DESC LIMIT 500",
+    )
+    .bind(&id)
+    .fetch_all(&s.db)
+    .await
+    .map_err(err500)?;
+    Ok(Json(rows))
 }
 
 async fn get_threshold(
@@ -225,7 +273,7 @@ async fn list_alarms(
     Query(q): Query<AlarmQuery>,
 ) -> ApiResult<Json<Vec<Alarm>>> {
     let mut qb = sqlx::QueryBuilder::new(
-        "SELECT id, device_id, type, created_at, resolved_at FROM alarm WHERE 1=1",
+        "SELECT id, device_id, type, message, created_at, resolved_at FROM alarm WHERE 1=1",
     );
     if let Some(d) = q.device_id {
         qb.push(" AND device_id = ").push_bind(d);

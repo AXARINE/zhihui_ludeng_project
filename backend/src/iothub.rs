@@ -303,7 +303,7 @@ async fn poll_device(
             .await?;
         } else {
             tracing::warn!("device {device_id} offline");
-            sqlx::query("INSERT INTO alarm (device_id, type) VALUES ($1, 'offline')")
+            sqlx::query("INSERT INTO alarm (device_id, type, message) VALUES ($1, 'offline', '设备离线')")
                 .bind(device_id)
                 .execute(&state.db)
                 .await?;
