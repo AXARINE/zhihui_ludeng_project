@@ -5,12 +5,12 @@
 #   1) HiBurn.exe 在 WSL 文件系统里缺执行权限 -> 自动 chmod +x
 #   2) HiBurn 无法读取 \\wsl.localhost 的 UNC 路径 -> 先复制到 Windows 本地临时目录再烧
 #   3) COM 参数使用数字格式 -com:N（-com:COMx 格式会导致 HiBurn 秒退）
-# 源码树位置默认 ~/bearpi,可用环境变量覆盖: BEARPI_ROOT=/path/to/bearpi ./flash.sh 4
+# 源码树默认用本仓库内 submodule(bearpi-hm_nano/);可用 BEARPI_ROOT=/path 覆盖(该目录下需有 bearpi-hm_nano/)
 set -e
 
 COM=${1:?usage: flash.sh <COM number>}
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-BEARPI_ROOT="${BEARPI_ROOT:-$HOME/bearpi}"
+BEARPI_ROOT="${BEARPI_ROOT:-$REPO_ROOT}"
 
 BIN="$BEARPI_ROOT/bearpi-hm_nano/out/BearPi-HM_Nano/Hi3861_wifiiot_app_allinone.bin"
 [ -f "$BIN" ] || { echo "firmware not found, run ./build.sh first"; exit 1; }

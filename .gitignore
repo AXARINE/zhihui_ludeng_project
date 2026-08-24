@@ -10,9 +10,9 @@ compile_commands.json
 .DS_Store
 Thumbs.db
 desktop.ini
-server/backend/target/
+backend/target/
 .env
-
+AGENTS.md
 # 云凭证与设备密钥(勿提交)
 credentials.csv
 DEVICES-*.txt
