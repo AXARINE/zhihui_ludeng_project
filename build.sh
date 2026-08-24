@@ -52,7 +52,8 @@ if ! grep -Eq '^[[:space:]]*"C3_e53_sc1_pls:e53_sc1_example"' "$BUILD_GN"; then
     || { echo "error: 自动启用失败,请手动编辑 $BUILD_GN 的 features"; exit 1; }
 fi
 
-# 在 submodule 自己的 git 配置里登记 exclude:凭据文件不进其 git 视野;out/ 是 root 属主产物,屏蔽扫描警告
+# submodule 的 git 卫生:凭据文件不进其 git 视野;out/ 是 root 属主产物,屏蔽其扫描;
+# 树内只读使用,submodule 永久 dirty 属预期(样例同步+BUILD.gn 启用),不再在 status 里刷屏
 GIT_DIR="$(git -C "$BEARPI_ROOT/bearpi-hm_nano" rev-parse --absolute-git-dir 2>/dev/null || true)"
 if [ -n "$GIT_DIR" ]; then
   mkdir -p "$GIT_DIR/info"
@@ -61,6 +62,8 @@ if [ -n "$GIT_DIR" ]; then
     "out/"; do
     grep -qxF "$pat" "$GIT_DIR/info/exclude" 2>/dev/null || echo "$pat" >> "$GIT_DIR/info/exclude"
   done
+  git -C "$BEARPI_ROOT/bearpi-hm_nano" config status.showUntrackedFiles no
+  git -C "$REPO_ROOT" config submodule.bearpi-hm_nano.ignore dirty
 fi
 
 docker run --rm   -v "$BEARPI_ROOT:/home/openharmony"   -w /home/openharmony/bearpi-hm_nano   -e PATH=/home/tools/gcc_riscv32/bin:/home/tools:/home/tools/ninja:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin   openharmony/openharmony-docker:0.0.3   bash -c "python build.py BearPi-HM_Nano "
