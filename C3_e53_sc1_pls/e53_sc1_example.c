@@ -34,10 +34,12 @@
 
 /* ===== 联网配置:真实凭据在 include/app_config.h(.gitignore 忽略) ===== */
 #include "app_config.h"
-#include "iotda_ca.h"  // IoTDA 8883(MQTTS)服务器根 CA
 
+/* 注意:IoTDA 8883 MQTTS 在本工程 iot_link/mbedtls 上实测不稳定
+ * (证书解析 calloc 内核崩溃、订阅 90s 超时、断开清理 panic,详见 git 记录),
+ * 故设备侧保持 1883 明文。iotda_ca.h 保留备用,勿直接启用。 */
 #define CONFIG_APP_SERVERIP "69b5bf8bcd.st1.iotda-device.cn-south-1.myhuaweicloud.com" // IoTDA 实例设备侧域名
-#define CONFIG_APP_SERVERPORT "8883"  // MQTTS(TLS 加密)
+#define CONFIG_APP_SERVERPORT "1883"  // MQTT 明文(8883 TLS 在 Hi3861 iot_link 上不可用)
 #define CONFIG_APP_LIFETIME 60              ///< 心跳周期,秒
 
 #define CONFIG_QUEUE_TIMEOUT (5 * 1000)
@@ -129,7 +131,11 @@ static void deal_report_msg(report_t *report) {
   led.type = EN_OC_MQTT_PROFILE_VALUE_STRING;
   led.nxt = NULL;
 
-  oc_mqtt_profile_propertyreport(NULL, &service);
+  /* 上报失败说明 MQTT 会话已死(网络抖过),清标志触发主循环重连 */
+  if (oc_mqtt_profile_propertyreport(NULL, &service) != (int)en_oc_mqtt_err_ok) {
+    g_app_cb.connected = 0;
+    printf("report failed, mqtt marked down\r\n");
+  }
   return;
 }
 
@@ -291,24 +297,12 @@ EXIT_JSONPARSE:
 }
 
 /***************************************************************
- * 函数名称: task_main_entry
- * 说    明: 主任务,连接 Wi-Fi 与 IoTDA,处理消息队列
+ * 函数名称: mqtt_connect
+ * 说    明: 建立一次到 IoTDA 的 MQTT(MQTTS)会话,可重复调用
  * 参    数: 无
- * 返 回 值: 0
+ * 返 回 值: 0 成功,其他失败
  ***************************************************************/
-static int task_main_entry(void) {
-  app_msg_t *app_msg;
-  uint32_t ret;
-
-  WifiConnect(CONFIG_WIFI_SSID, CONFIG_WIFI_PWD);
-  dtls_al_init();
-  mqtt_al_init();
-  oc_mqtt_init();
-
-  g_app_cb.app_msg = queue_create("queue_rcvmsg", 10, 1);
-  if (NULL == g_app_cb.app_msg) {
-    printf("Create receive msg queue failed");
-  }
+static int mqtt_connect(void) {
   oc_mqtt_profile_connect_t connect_para;
   (void)memset(&connect_para, 0, sizeof(connect_para));
 
@@ -319,21 +313,61 @@ static int task_main_entry(void) {
   connect_para.server_port = CONFIG_APP_SERVERPORT;
   connect_para.life_time = CONFIG_APP_LIFETIME;
   connect_para.rcvfunc = msg_rcv_callback;
-  connect_para.security.type = EN_DTLS_AL_SECURITY_TYPE_CERT;
-  connect_para.security.u.cert.server_ca = (uint8_t *)g_iotda_server_ca;
-  connect_para.security.u.cert.server_ca_len = (int)sizeof(g_iotda_server_ca);
-  ret = oc_mqtt_profile_connect(&connect_para);
-  if ((ret == (int)en_oc_mqtt_err_ok)) {
-    g_app_cb.connected = 1;
-    printf("oc_mqtt_profile_connect succed!\r\n");
-  } else {
-    printf("oc_mqtt_profile_connect faild!\r\n");
+  connect_para.security.type = EN_DTLS_AL_SECURITY_TYPE_NONE;
+  /* 重连前先把可能残留的会话清掉 */
+  (void)oc_mqtt_profile_disconnect();
+  return oc_mqtt_profile_connect(&connect_para);
+}
+
+/***************************************************************
+ * 函数名称: task_main_entry
+ * 说    明: 主任务,连接 Wi-Fi 与 IoTDA,处理消息队列;
+ *           状态机式链路维护:Wi-Fi 断开(Hi3861 驱动会自动重关联)则
+ *           标记 MQTT 下线,Wi-Fi 恢复后自动重连 MQTT,断网不再变砖
+ * 参    数: 无
+ * 返 回 值: 0
+ ***************************************************************/
+static int task_main_entry(void) {
+  app_msg_t *app_msg;
+
+  g_app_cb.app_msg = queue_create("queue_rcvmsg", 10, 1);
+  if (NULL == g_app_cb.app_msg) {
+    printf("Create receive msg queue failed");
+  }
+  dtls_al_init();
+  mqtt_al_init();
+  oc_mqtt_init();
+
+  /* 开机先连上 Wi-Fi(失败由 WifiConnect 返回 -1,这里退避重试) */
+  while (WifiConnect(CONFIG_WIFI_SSID, CONFIG_WIFI_PWD) != 0) {
+    printf("wifi connect failed, retry in 5s\r\n");
+    osDelay(5000);
   }
 
   while (1) {
+    /* 链路健康检查:Wi-Fi 掉了 => MQTT 会话必然已死;
+     * 等驱动重关联成功(WifiConnectStatus 回 1)后重连 MQTT */
+    if (WifiConnectStatus() != 1) {
+      g_app_cb.connected = 0;
+    }
+    if (g_app_cb.connected != 1) {
+      if (WifiConnectStatus() != 1) {
+        osDelay(1000);
+        continue;
+      }
+      if (mqtt_connect() == (int)en_oc_mqtt_err_ok) {
+        g_app_cb.connected = 1;
+        printf("oc_mqtt_profile_connect succed!\r\n");
+      } else {
+        printf("oc_mqtt_profile_connect faild, retry in 5s\r\n");
+        osDelay(5000);
+        continue;
+      }
+    }
+
     app_msg = NULL;
-    (void)queue_pop(g_app_cb.app_msg, (void **)&app_msg, 0xFFFFFFFF);
-    if (NULL != app_msg) {
+    /* 1s 超时(原先是永久阻塞),让上面的健康检查周期性执行 */
+    if (queue_pop(g_app_cb.app_msg, (void **)&app_msg, 1000) == 0 && NULL != app_msg) {
       switch (app_msg->msg_type) {
         case en_msg_cmd:
           deal_cmd_msg(&app_msg->msg.cmd);

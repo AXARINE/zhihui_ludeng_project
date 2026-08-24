@@ -14,7 +14,7 @@ use std::sync::Arc;
 enum Error {
     #[error("database error: {0}")]
     Db(#[from] sqlx::Error),
-    #[error("IoTDA 北向调用失败: {0}")]
+    #[error("IoTDA 北向调用失败: {0:#}")]
     Iothub(#[from] anyhow::Error),
     #[error("{0}")]
     BadRequest(String),

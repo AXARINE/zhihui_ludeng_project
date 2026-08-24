@@ -127,7 +127,8 @@ impl IothubClient {
             .ok_or_else(|| anyhow::anyhow!("无法确定 IoTDA 区域,请设置 HUAWEI_IOTDA_REGION"))?;
         Ok(Some(Arc::new(Self {
             http: reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
+                // IoTDA 下发命令会同步等设备响应(默认约 20s),超时短于此会误判失败
+                .timeout(Duration::from_secs(35))
                 .build()?,
             endpoint,
             region,
@@ -305,7 +306,7 @@ pub async fn run(state: Arc<AppState>, iothub: Arc<IothubClient>) {
                 let iothub = &iothub;
                 async move {
                     if let Err(e) = poll_device(state, iothub, &device_id).await {
-                        tracing::warn!("poll {device_id} failed: {e}");
+                        tracing::warn!("poll {device_id} failed: {e:#}");
                     }
                 }
             })

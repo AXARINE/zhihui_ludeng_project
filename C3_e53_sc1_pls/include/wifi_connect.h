@@ -18,5 +18,12 @@
 
 int WifiConnect(const char *ssid,const char *psk);
 
+/***************************************************************
+ * 函 数 名: WifiConnectStatus
+ * 说    明: 查询 Wi-Fi 当前连接状态
+ * 返 回 值: 1 已连接,0 已断开
+ ***************************************************************/
+int WifiConnectStatus(void);
+
 #endif /* __WIFI_CONNECT_H__ */
 

@@ -7,7 +7,7 @@
 ## 架构
 
 ```
-Hi3861 --Wi-Fi/MQTTS(oc_mqtt, 8883 TLS)--> 华为云 IoTDA(标准版实例, cn-south-1)
+Hi3861 --Wi-Fi/MQTT(oc_mqtt, 1883)--> 华为云 IoTDA(标准版实例, cn-south-1)
                                               ↑ 北向 API(HTTPS, AK/SK V11 衍生签名)
 本地:Rust 后端(axum, 8080) --> PostgreSQL(Docker)
 ```
@@ -25,7 +25,6 @@ Hi3861 --Wi-Fi/MQTTS(oc_mqtt, 8883 TLS)--> 华为云 IoTDA(标准版实例, cn-s
 - 设备在线状态监控、离线告警(恢复自动消解)
 - 控制指令留痕(动作/来源/北向受理结果,可审计)
 - 设备管理(注册、位置、删除)
-- 设备链路 MQTTS 加密(设备密钥不再明文传输)
 
 ## 目录说明
 
@@ -90,7 +89,7 @@ cargo run                   # 监听 8080,首次启动自动建表
 
 ## IoTDA 侧配置要点
 
-1. 创建**标准版实例**,在"实例 → 接入信息"记下**设备侧域名**(填固件,MQTT 1883 / MQTTS 8883)和**应用侧域名**(填 `.env`);标准版没有区域共享域名。
+1. 创建**标准版实例**,在"实例 → 接入信息"记下**设备侧域名**(填固件,本项目使用 1883 明文 MQTT,不要用 8883,原因见"安全说明")和**应用侧域名**(填 `.env`);标准版没有区域共享域名。
 2. 创建产品,模型定义服务 `Light`:属性 `Luminance`(int)、`LightStatus`(string)、`Threshold`(int,**必须可读可写**);命令 `Light_Control_Led`(参数 `Led`:ON/OFF/AUTO)。
 3. 注册设备,拿到设备 ID / 密钥(填 `app_config.h`)。
 4. IAM 创建用户(AK/SK),用户组挂 IoTDA 权限(如 `IoTDA:*:*`),授权有数分钟传播延迟。
@@ -104,7 +103,7 @@ cargo run                   # 监听 8080,首次启动自动建表
 
 ## 安全说明
 
-- 设备 → IoTDA 使用 8883 MQTTS(TLS,证书链校验,根 CA 内嵌 `include/iotda_ca.h`)。已知边界:设备无 RTC 不校验证书有效期;iot_link 栈不校验服务器主机名。
+- 设备 → IoTDA 使用 1883 明文 MQTT。**不要启用 8883 MQTTS**:本工程 iot_link 内置的 mbedtls 在 Hi3861 上运行 TLS 存在稳定性问题(证书解析阶段触发内核异常,单条 SUBSCRIBE 最长 90s 后失败,断开清理阶段 panic,设备陷入重启循环,云端命令下发超时 IOTDA.014111;2026-08-24 实测)。根 CA 保留在 `include/iotda_ca.h` 备用,问题解决前不要启用。
 - Wi-Fi 密码与设备密钥只存在于本地 `app_config.h`(被 .gitignore 忽略),不进任何 git 仓库。
 
 ## 已知坑(脚本已内置修复,勿回退)

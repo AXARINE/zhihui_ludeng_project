@@ -24,6 +24,9 @@ FROM debian:bookworm-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+# 容器无 IPv6 出口,而 IoTDA 域名 DNS 会把 AAAA 记录排在前面,导致 reqwest 连
+# IPv6 失败;gai.conf 提高 IPv4 优先级(getaddrinfo 排序),强制偏好 IPv4
+RUN echo 'precedence ::ffff:0:0/96 100' > /etc/gai.conf
 COPY --from=builder /app/target/release/streetlight-backend /usr/local/bin/streetlight-backend
 EXPOSE 8080
 CMD ["streetlight-backend"]

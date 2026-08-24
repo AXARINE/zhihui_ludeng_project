@@ -135,7 +135,7 @@ int WifiConnect(const char *ssid, const char *psk)
         if(i == ssid_count-1)
         {
             printf("ERROR: No wifi as expected\r\n");
-            while(1) osDelay(100);
+            return -1;  // 交还调用方重试,不再原地死等
         }
     }
      //启动DHCP
@@ -234,6 +234,16 @@ static void OnHotspotStateChangedHandler(int state)
 {
     printf("HotspotStateChanged:state is %d.\n", state);
     return;
+}
+
+/***************************************************************
+ * 函数名称: WifiConnectStatus
+ * 说    明: 查询当前 Wi-Fi 连接状态(由连接事件回调维护)
+ * 返 回 值: 1 已连接,0 已断开
+ ***************************************************************/
+int WifiConnectStatus(void)
+{
+    return g_ConnectSuccess;
 }
 
 static void WaitSacnResult(void)
