@@ -63,7 +63,7 @@ docker run -d --name streetlight-postgres \
 ### 3. 启动后端
 
 ```bash
-cd server/backend
+cd backend
 cargo run --release
 ```
 
@@ -106,14 +106,14 @@ bash build.sh
 │   │   └── e53_sc1_example.c   # 主程序（传感器读取 + MQTT 上报）
 │   └── build.sh                 # Docker 编译脚本
 │
-├── server/backend/              # Rust 后端（axum + sqlx）
+├── backend/                      # Rust 后端（axum + sqlx）
 │   ├── src/
-│   │   ├── main.rs             # 入口（CORS、迁移、自动建表）
-│   │   ├── api.rs              # REST API（设备、告警、问答）
-│   │   ├── auth.rs             # JWT 认证
-│   │   ├── iothub.rs           # 华为云 IoTDA 北向接口
-│   │   └── poll.rs             # 设备状态轮询
-│   ├── migrations/              # 数据库迁移
+│   │   ├── main.rs               # 入口（CORS、迁移、自动建表）
+│   │   ├── api.rs                # REST API（设备、告警、问答）
+│   │   ├── auth.rs               # JWT 认证 + RBAC
+│   │   ├── iothub.rs             # 华为云 IoTDA 北向接口
+│   │   └── ...
+│   ├── migrations/               # 数据库迁移
 │   └── Cargo.toml
 │
 └── frontend_vue/                # Vue3 前端
@@ -132,7 +132,7 @@ bash build.sh
 
 ## 环境变量
 
-后端 `.env` 文件（`server/backend/.env`）：
+后端 `.env` 文件（`backend/.env`）：
 
 ```env
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/streetlight
