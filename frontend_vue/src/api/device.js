@@ -67,19 +67,16 @@ export function getCommands(params) {
 }
 
 // ============================================
-// 告警标记已处理
-// POST /api/alarms/{id}/resolve
+// 更新告警状态（标记已处理 / 恢复未处理）
+// PATCH /api/alarms/{id}
+// 后端用一个 PATCH 接口统一处理，通过 body 传 resolved 字段
 // ============================================
 export function resolveAlarm(id) {
-  return request({ url: `/alarms/${id}/resolve`, method: 'post' })
+  return request({ url: `/alarms/${id}`, method: 'patch', data: { resolved: true } })
 }
 
-// ============================================
-// 告警恢复未处理
-// POST /api/alarms/{id}/unresolve
-// ============================================
 export function unresolveAlarm(id) {
-  return request({ url: `/alarms/${id}/unresolve`, method: 'post' })
+  return request({ url: `/alarms/${id}`, method: 'patch', data: { resolved: false } })
 }
 
 // ============================================
@@ -212,4 +209,98 @@ export function getAlarmList(params) {
   //   device_id: '001',     // 可选，按设备筛选
   //   resolved: true/false  // 可选，按状态筛选
   // }
+}
+
+// ============================================
+// 10. 更新设备信息
+// PATCH /api/devices/{id}
+// ============================================
+export function updateDevice(deviceId, data) {
+  return request({
+    url: `/devices/${deviceId}`,
+    method: 'patch',
+    data
+  })
+  // data 的格式：
+  // {
+  //   name: '新名称',       // 可选
+  //   status: 'online'      // 可选
+  // }
+}
+
+// ============================================
+// 11. 获取当前登录用户信息
+// GET /api/auth/me
+// ============================================
+export function getMe() {
+  return request({ url: '/auth/me', method: 'get' })
+}
+
+// ============================================
+// 12. 获取权限列表
+// GET /api/permissions
+// ============================================
+export function getPermissions() {
+  return request({ url: '/permissions', method: 'get' })
+}
+
+// ============================================
+// 13. 更新角色权限
+// PUT /api/roles/{id}/permissions
+// ============================================
+export function updateRolePermissions(roleId, permissions) {
+  return request({
+    url: `/roles/${roleId}/permissions`,
+    method: 'put',
+    data: { permissions }
+  })
+  // permissions: 权限名称数组，例如 ['device:status', 'alarm:log']
+}
+
+// ============================================
+// 14. 获取仪表盘数据
+// GET /api/dashboard
+// ============================================
+export function getDashboard() {
+  return request({ url: '/dashboard', method: 'get' })
+}
+
+// ============================================
+// 15. 获取光照统计数据
+// GET /api/devices/{id}/lux/stats
+// ============================================
+export function getLuxStats(deviceId, params) {
+  return request({
+    url: `/devices/${deviceId}/lux/stats`,
+    method: 'get',
+    params
+  })
+}
+
+// ============================================
+// 16. 获取单设备命令日志
+// GET /api/devices/{id}/commands
+// ============================================
+export function getDeviceCommands(deviceId, params) {
+  return request({
+    url: `/devices/${deviceId}/commands`,
+    method: 'get',
+    params
+  })
+}
+
+// ============================================
+// 17. 获取全局最新光照数据（所有设备）
+// GET /api/lux/latest
+// ============================================
+export function getGlobalLuxLatest() {
+  return request({ url: '/lux/latest', method: 'get' })
+}
+
+// ============================================
+// 18. 健康检查
+// GET /api/health
+// ============================================
+export function getHealth() {
+  return request({ url: '/health', method: 'get' })
 }
