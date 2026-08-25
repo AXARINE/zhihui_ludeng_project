@@ -946,17 +946,32 @@ async fn dashboard(State(s): State<Arc<AppState>>, auth: Auth) -> Result<Json<Da
 }
 
 /// POST /api/assistant/ask —— 维护智能问答（本地知识库检索，无需外部大模型）
-#[derive(Deserialize)]
+#[derive(Deserialize, ToSchema)]
 struct AssistantAskIn {
     question: String,
 }
 
+#[derive(Serialize, ToSchema)]
+struct AssistantAnswer {
+    answer: String,
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/assistant/ask",
+    request_body = AssistantAskIn,
+    responses(
+        (status = 200, description = "问答结果", body = AssistantAnswer),
+        (status = 403, description = "无权限")
+    ),
+    security(("bearer_auth" = []))
+)]
 async fn assistant_ask(
     State(s): State<Arc<AppState>>,
     auth: Auth,
     Json(body): Json<AssistantAskIn>,
-) -> Result<Json<serde_json::Value>, Error> {
+) -> Result<Json<AssistantAnswer>, Error> {
     auth.require(&s.db, "assistant:qa").await?;
     let answer = assistant::answer(&s.db, &body.question).await?;
-    Ok(Json(serde_json::json!({ "answer": answer })))
+    Ok(Json(AssistantAnswer { answer }))
 }

@@ -24,12 +24,14 @@ pub struct AppState {
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "info".into()),
         )
         .init();
 
-    let database_url = std::env::var("DATABASE_URL")
-        .unwrap_or_else(|_| "postgres://streetlight:streetlight@127.0.0.1:5432/streetlight".into());
+    let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
+        "postgres://streetlight:streetlight@127.0.0.1:5432/streetlight".into()
+    });
 
     let db = PgPoolOptions::new()
         .max_connections(5)
@@ -68,7 +70,10 @@ async fn main() -> anyhow::Result<()> {
 
     let app: Router = api::router(state.clone())
         .merge(auth::router(state.clone()))
-        .merge(SwaggerUi::new("/docs").url("/api/openapi.json", openapi::openapi()))
+        .merge(
+            SwaggerUi::new("/docs")
+                .url("/api/openapi.json", openapi::openapi()),
+        )
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth::auth_middleware,

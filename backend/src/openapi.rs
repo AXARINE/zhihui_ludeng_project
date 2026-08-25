@@ -1,4 +1,5 @@
 //! OpenAPI/Swagger 文档:汇总各模块带 `#[utoipa::path]` 注解的 handler
+//! 新增的api请放在这里
 use crate::{api, auth};
 use utoipa::OpenApi;
 
@@ -7,7 +8,7 @@ use utoipa::OpenApi;
     info(
         title = "智慧路灯后端 API",
         version = "0.1.0",
-        description = "设备 / 光照 / 控灯 / 阈值 / 告警 / 指令留痕 / 账号与 RBAC。\
+        description = "设备 / 光照 / 控灯 / 阈值 / 告警 / 指令留痕 / 账号与 RBAC / 维护智能问答。\
                       受保护接口先调用 POST /api/auth/login 拿到 token,再点右上角 Authorize 填入。"
     ),
     paths(
@@ -28,6 +29,7 @@ use utoipa::OpenApi;
         api::list_alarms,
         api::patch_alarm,
         api::dashboard,
+        api::assistant_ask,
         auth::login,
         auth::me,
         auth::list_users,

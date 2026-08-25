@@ -7,7 +7,9 @@ use crate::AppState;
 use crate::api::Error;
 use argon2::Argon2;
 use argon2::password_hash::rand_core::OsRng;
-use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
+use argon2::password_hash::{
+    PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
+};
 use axum::extract::Request;
 use axum::extract::{FromRequestParts, Path, State};
 use axum::http::request::Parts;
@@ -17,7 +19,9 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
-use jsonwebtoken::{DecodingKey, EncodingKey, Header, Validation, decode, encode};
+use jsonwebtoken::{
+    DecodingKey, EncodingKey, Header, Validation, decode, encode,
+};
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::sync::Arc;
@@ -67,13 +71,9 @@ where
         parts: &mut Parts,
         _state: &S,
     ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
-        std::future::ready(
-            parts
-                .extensions
-                .get::<Self>()
-                .cloned()
-                .ok_or_else(|| (StatusCode::UNAUTHORIZED, "未登录或登录已过期").into_response()),
-        )
+        std::future::ready(parts.extensions.get::<Self>().cloned().ok_or_else(
+            || (StatusCode::UNAUTHORIZED, "未登录或登录已过期").into_response(),
+        ))
     }
 }
 
@@ -86,7 +86,10 @@ struct Claims {
     exp: usize,
 }
 
-fn decode_token(state: &AppState, token: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
+fn decode_token(
+    state: &AppState,
+    token: &str,
+) -> Result<Claims, jsonwebtoken::errors::Error> {
     decode::<Claims>(
         token,
         &DecodingKey::from_secret(state.jwt_secret.as_bytes()),
@@ -118,7 +121,8 @@ pub async fn auth_middleware(
             .into_response();
     };
     let Ok(claims) = decode_token(&state, token) else {
-        return (StatusCode::UNAUTHORIZED, "token 无效或已过期").into_response();
+        return (StatusCode::UNAUTHORIZED, "token 无效或已过期")
+            .into_response();
     };
     req.extensions_mut().insert(Auth {
         user_id: claims.user_id,
@@ -286,7 +290,8 @@ async fn login(
     .await?
     .ok_or_else(|| Error::Unauthorized("用户名或密码错误".into()))?;
 
-    if user.status != 1 || !verify_password(&body.password, &user.password_hash) {
+    if user.status != 1 || !verify_password(&body.password, &user.password_hash)
+    {
         return Err(Error::Unauthorized("用户名或密码错误".into()));
     }
 
@@ -300,7 +305,8 @@ async fn login(
     .await?;
 
     let exp = Utc::now().timestamp() + TOKEN_TTL_SECS;
-    let exp = usize::try_from(exp).map_err(|_| Error::Internal("token 过期时间溢出".into()))?;
+    let exp = usize::try_from(exp)
+        .map_err(|_| Error::Internal("token 过期时间溢出".into()))?;
     let claims = Claims {
         user_id: user.id,
         username: user.username.clone(),
@@ -340,7 +346,10 @@ async fn login(
     ),
     security(("bearer_auth" = []))
 )]
-async fn me(State(s): State<Arc<AppState>>, auth: Auth) -> Result<Json<UserOut>, Error> {
+async fn me(
+    State(s): State<Arc<AppState>>,
+    auth: Auth,
+) -> Result<Json<UserOut>, Error> {
     let user = fetch_user_by_id(&s.db, auth.user_id)
         .await?
         .ok_or_else(|| Error::Unauthorized("账号不存在或已被删除".into()))?;
@@ -394,18 +403,20 @@ async fn create_user(
     if body.password.len() < 6 || body.password.len() > 64 {
         return Err(Error::BadRequest("密码长度需在 6~64 之间".into()));
     }
-    let role_exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM role WHERE id = $1)")
-        .bind(body.role_id)
-        .fetch_one(&s.db)
-        .await?;
+    let role_exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM role WHERE id = $1)")
+            .bind(body.role_id)
+            .fetch_one(&s.db)
+            .await?;
     if !role_exists {
         return Err(Error::BadRequest("角色不存在".into()));
     }
-    let exists: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM app_user WHERE username = $1)")
-            .bind(&username)
-            .fetch_one(&s.db)
-            .await?;
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM app_user WHERE username = $1)",
+    )
+    .bind(&username)
+    .fetch_one(&s.db)
+    .await?;
     if exists {
         return Err(Error::Conflict("用户名已存在".into()));
     }
@@ -456,7 +467,10 @@ async fn delete_user(
     Ok(Json(user))
 }
 
-async fn fetch_user_by_id(db: &PgPool, id: i64) -> Result<Option<UserOut>, Error> {
+async fn fetch_user_by_id(
+    db: &PgPool,
+    id: i64,
+) -> Result<Option<UserOut>, Error> {
     let row = sqlx::query_as::<_, UserRow>(
         "SELECT u.id, u.username, u.password_hash, u.real_name, u.role_id, u.status, \
                 u.created_at, u.updated_at, r.role_code, r.role_name \
@@ -515,15 +529,15 @@ async fn list_permissions(
     .await?;
     Ok(Json(
         rows.into_iter()
-            .map(
-                |(id, perm_code, perm_name, module, description)| PermissionOut {
+            .map(|(id, perm_code, perm_name, module, description)| {
+                PermissionOut {
                     id,
                     perm_code,
                     perm_name,
                     module,
                     description,
-                },
-            )
+                }
+            })
             .collect(),
     ))
 }
@@ -548,17 +562,20 @@ async fn update_role_permissions(
     Json(body): Json<RolePermissionsIn>,
 ) -> Result<StatusCode, Error> {
     auth.require(&s.db, "user:manage").await?;
-    let exists: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM role WHERE id = $1)")
-        .bind(id)
-        .fetch_one(&s.db)
-        .await?;
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM role WHERE id = $1)")
+            .bind(id)
+            .fetch_one(&s.db)
+            .await?;
     if !exists {
         return Err(Error::NotFound(format!("角色 {id} 不存在")));
     }
-    let valid = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM permission WHERE id = ANY($1)")
-        .bind(&body.permission_ids)
-        .fetch_one(&s.db)
-        .await?;
+    let valid = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM permission WHERE id = ANY($1)",
+    )
+    .bind(&body.permission_ids)
+    .fetch_one(&s.db)
+    .await?;
     let expected = i64::try_from(body.permission_ids.len())
         .map_err(|_| Error::BadRequest("权限 ID 列表过长".into()))?;
     if valid != expected {
@@ -608,7 +625,8 @@ pub async fn bootstrap_admin(db: &PgPool) -> anyhow::Result<()> {
     if count > 0 {
         return Ok(());
     }
-    let username = std::env::var("BOOTSTRAP_ADMIN_USERNAME").unwrap_or_else(|_| "admin".into());
+    let username = std::env::var("BOOTSTRAP_ADMIN_USERNAME")
+        .unwrap_or_else(|_| "admin".into());
     let password = std::env::var("BOOTSTRAP_ADMIN_PASSWORD").unwrap_or_else(|_| {
         tracing::warn!(
             "BOOTSTRAP_ADMIN_PASSWORD 未设置,使用默认账号 admin/admin123(生产环境请覆盖)"
