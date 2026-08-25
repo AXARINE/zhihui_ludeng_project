@@ -49,9 +49,13 @@
 #define REPORT_INTERVAL_TICKS 100           // 5s = 100 x 50ms
 
 /* auto 模式防闪烁(施密特触发 + 灯光自照度补偿 + 连续确认) */
-#define LUX_HYSTERESIS 20                   // 迟滞半带(lx),需 > 读数噪声(L-res 1 计数≈7lx)
-#define LAMP_SELF_LUX 200                   // 补光灯在传感器处的自照度估计(lx),需实测校准
+#define LUX_HYSTERESIS 40                   // 迟滞半带(lx),加大到 40 防止边界抖动
+#define LAMP_SELF_LUX 30                    // 补光灯在传感器处的自照度估计(lx),降到 30 避免 basis 始终为 0
 #define SWITCH_CONFIRM_TICKS 20             // 切换条件需连续满足的采样数(20 x 50ms = 1s)
+#define LUX_FILTER_SIZE 5                   // 滑动平均窗口(5 × 50ms = 250ms)
+static float lux_buf[LUX_FILTER_SIZE];      // 滤波缓冲区
+static int lux_buf_idx = 0;                 // 缓冲区写入位置
+static int lux_buf_filled = 0;              // 缓冲区是否已填满
 
 #define MODE_AUTO 0   // 光照联动
 #define MODE_MANUAL 1 // 手动控制(云端下发)
@@ -87,7 +91,7 @@ typedef struct {
 static app_cb_t g_app_cb;
 
 /* 任务间共享状态 */
-static volatile int g_threshold = 40; // 开关灯光照阈值,可被云端属性设置覆盖
+static volatile int g_threshold = 120; // 开关灯光照阈值,可被云端属性设置覆盖
 static volatile int g_mode = MODE_AUTO; // 当前控制模式
 
 /***************************************************************
@@ -400,6 +404,7 @@ static int task_sensor_entry(void) {
   float lux;
   int tick = 0;
   int confirm_ticks = 0;
+  int auto_debug_tick = 0;  // auto 模式调试输出计数
 
   E53_SC1_Init();
   usleep(20000); // 等待 BH1750 完成第一次转换(16ms)
@@ -410,6 +415,27 @@ static int task_sensor_entry(void) {
 
   while (1) {
     lux = E53_SC1_Read_Data();
+    /* 滑动平均滤波:BH1750 在 L-res 模式下单次跳变可达 ±1000lx,
+     * 用 5 点中值+均值混合滤波消除尖峰 */
+    lux_buf[lux_buf_idx] = lux;
+    lux_buf_idx = (lux_buf_idx + 1) % LUX_FILTER_SIZE;
+    if (!lux_buf_filled && lux_buf_idx == 0) lux_buf_filled = 1;
+    {
+      int count = lux_buf_filled ? LUX_FILTER_SIZE : lux_buf_idx;
+      if (count > 0) {
+        /* 排序取中值(冒泡,5 元素够快) */
+        float sorted[LUX_FILTER_SIZE];
+        memcpy(sorted, lux_buf, count * sizeof(float));
+        for (int i = 0; i < count - 1; i++)
+          for (int j = 0; j < count - i - 1; j++)
+            if (sorted[j] > sorted[j+1]) {
+              float t = sorted[j]; sorted[j] = sorted[j+1]; sorted[j+1] = t;
+            }
+        float median = sorted[count / 2];
+        /* 取中值和当前值的较小者,进一步抑制向上尖峰 */
+        lux = (median < lux) ? median : (median * 0.7f + lux * 0.3f);
+      }
+    }
     if (g_mode == MODE_AUTO) {
       /* 直接 lux < threshold 翻转灯会频闪:补光灯照回传感器,开灯读数
        * 立刻越过阈值 -> 关灯 -> 掉回 -> 再开,形成 10Hz 自反馈振荡。
@@ -434,6 +460,12 @@ static int task_sensor_entry(void) {
         }
       } else {
         confirm_ticks = 0;
+      }
+      /* 每秒输出一次 auto 模式状态,方便观察持续监测 */
+      if (++auto_debug_tick >= 20) {
+        auto_debug_tick = 0;
+        printf("auto: lux=%.1f th=%d led=%d want=%d confirm=%d\r\n",
+               lux, g_threshold, g_app_cb.led, want, confirm_ticks);
       }
     } else {
       confirm_ticks = 0;

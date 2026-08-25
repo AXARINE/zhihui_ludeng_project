@@ -66,6 +66,23 @@ if [ -n "$GIT_DIR" ]; then
   git -C "$REPO_ROOT" config submodule.bearpi-hm_nano.ignore dirty
 fi
 
-docker run --rm   -v "$BEARPI_ROOT:/home/openharmony"   -w /home/openharmony/bearpi-hm_nano   -e PATH=/home/tools/gcc_riscv32/bin:/home/tools:/home/tools/ninja:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin   openharmony/openharmony-docker:0.0.3   bash -c "python build.py BearPi-HM_Nano "
+docker run --rm   -v "$BEARPI_ROOT:/home/openharmony"   -w /home/openharmony/bearpi-hm_nano   -e PATH=/home/tools/gcc_riscv32/bin:/home/tools:/home/tools/ninja:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin   -e PYTHONPATH=/home/openharmony/bearpi-hm_nano/build:/home/openharmony/bearpi-hm_nano/build/lite   openharmony/openharmony-docker:0.0.3   bash -c "
+    echo '=== fixing CRLF line endings ==='
+    find . -type f \( -name '*.sh' -o -name '*.py' -o -name 'hm_build.sh' \) -exec sed -i 's/\r$//' {} +
+    echo '=== fixing broken symlinks ==='
+    for broken in \$(find . -type f -size -200c 2>/dev/null | head -50); do
+      target=\$(head -1 \"\$broken\" 2>/dev/null | tr -d ' \\n\\r')
+      if echo \"\$target\" | grep -q '^\.\./\.\./\.\.'; then
+        dir=\$(dirname \"\$broken\")
+        if [ -e \"\$dir/\$target\" ]; then
+          rm \"\$broken\"
+          ln -s \"\$target\" \"\$broken\"
+          echo \"fixed symlink: \$broken -> \$target\"
+        fi
+      fi
+    done
+    echo '=== starting build ==='
+    python build/lite/build.py BearPi-HM_Nano
+  "
 
 "$REPO_ROOT/gen-compdb.sh" || echo "warning: compile_commands.json 更新失败(不影响固件)"
