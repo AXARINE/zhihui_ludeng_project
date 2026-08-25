@@ -1,6 +1,7 @@
 # 编辑器 / 语言服务器缓存
 .cache/
 .agent/
+.claude/settings.local.json
 .clangd
 compile_commands.json
 

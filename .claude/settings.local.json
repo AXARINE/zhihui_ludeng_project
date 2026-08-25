@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git add *)",
+      "Bash(git commit -m 'chore: 删除重复目录 frontend_new，迁移 server/.env，修复前端 API 接口匹配后端 *)",
+      "Bash(git commit *)"
+    ]
+  }
+}
