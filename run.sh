@@ -1,7 +1,21 @@
 #!/bin/bash
-# 智慧路灯系统一键启动（Windows Git Bash 运行: ./run.sh）
-# 1) 确保 PostgreSQL 容器在跑(Docker Desktop 需先启动)
-# 2) 加载 .env 并启动后端(8080)
+# ============================================================
+# 智慧路灯系统一键启动脚本
+#
+# 适用环境 : Windows Git Bash + Docker Desktop
+#            (Windows 原生 cargo,后端产物为 .exe)
+# 用法     : ./run.sh
+# 流程     : 1) 确保 PostgreSQL 容器 streetlight-postgres 在运行
+#            2) 加载 backend/.env 环境变量
+#            3) 启动后端并监听 8080
+#               (优先运行已编译的 target/debug/streetlight-backend.exe,
+#                否则 cargo run)
+#
+# 注意     : 本脚本仅供 Windows 侧使用,WSL 内请走标准工作流:
+#              cd ~/bearpi/smart-street-light/backend
+#              ./infra-up.sh                             # 只起数据库(WSL 原生 docker)
+#              set -a && . ./.env && set +a && cargo run # 起后端
+# ============================================================
 set -e
 cd "$(dirname "$0")/backend"
 
