@@ -91,7 +91,7 @@ typedef struct {
 static app_cb_t g_app_cb;
 
 /* 任务间共享状态 */
-static volatile int g_threshold = 120; // 开关灯光照阈值,可被云端属性设置覆盖
+static volatile int g_threshold = 300; // 开关灯光照阈值,可被云端属性设置覆盖
 static volatile int g_mode = MODE_AUTO; // 当前控制模式
 
 /***************************************************************

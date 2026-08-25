@@ -1,248 +1,177 @@
-# 智慧路灯(BearPi-HM Nano)
+# 智慧路灯 IoT 管理系统
 
-基于小熊派 **BearPi-HM Nano**(海思 Hi3861,RISC-V 32 位,OpenHarmony 轻量系统 + LiteOS-M)、E53_SC1 扩展板(BH1750 光照传感器 + 补光灯),经**华为云 IoTDA** 接入的智慧路灯项目。
+基于 BearPi-HM Nano（RISC-V）+ 华为云 IoTDA 的智慧路灯系统，支持光照监测、自动/手动控制、告警管理、智能问答。
 
-需求文档:`智慧路灯_基本功能清单.md`;部署文档:`华为云IoTDA部署文档.md`。
-
-## 架构
+## 系统架构
 
 ```
-Hi3861 --Wi-Fi/MQTT(oc_mqtt, 1883)--> 华为云 IoTDA(标准版实例, cn-south-1)
-                                              ↑ 北向 API(HTTPS, AK/SK V11 衍生签名)
-本地:Rust 后端(axum, 8080) --> PostgreSQL(Docker)
+┌─────────────┐     MQTT      ┌──────────────┐     HTTPS      ┌──────────────┐
+│  BH1750传感器 │ ───────────→ │  华为云 IoTDA  │ ←──────────── │  Rust 后端    │
+│  BearPi开发板 │ ←─────────── │  （设备接入）   │ ────────────→ │  (axum 8080)  │
+└─────────────┘    控制指令    └──────────────┘    数据查询     └──────┬───────┘
+                                                                      │
+                                                              ┌───────┴───────┐
+                                                              │  Vue3 前端     │
+                                                              │  (Vite 5173)  │
+                                                              └───────────────┘
 ```
 
-- **设备端**:BH1750 每 50ms 采样,本地按阈值联动开关灯(断网可用),每 5s 上报影子属性;
-- **云端**:IoTDA 保存设备影子与在线状态,负责下行命令/属性转发;
-- **后端**:每 8s 轮询影子入库,对前端提供 REST API(前端不在本仓库);含账号登录 + RBAC 权限(见下文)。
+## 功能清单
 
-## 已实现功能(全链路已验收)
-
-- 实时光照监测、历史数据查询
-- 光照联动开关灯(施密特触发 + 迟滞带,防开灯自照引起的频闪)
-- 远程控灯(ON / OFF / AUTO 恢复联动)
-- 光照阈值云端下发(可写属性 `Threshold`)
-- 设备在线状态监控、离线告警(恢复自动消解)
-- 控制指令留痕(动作/来源/北向受理结果,可审计)
-- 设备管理(注册、位置、删除)
-- 账号 / 登录 / RBAC(JWT + Argon2id,角色:市政人员 / 路灯管理员)
-- Swagger UI 接口文档与在线调试(`/docs`)
-- 告警人工处理(标记已处理 / 恢复未处理)
-- 仪表盘聚合、全局光照 / 指令查询
-
-## 目录说明
-
-| 路径 | 内容 |
-|---|---|
-| `C3_e53_sc1_pls/` | 固件源码(权威副本,改固件只改这里;基于官方 E53_SC1 + D9 样例) |
-| `bearpi-hm_nano/` | OpenHarmony 源码树(git submodule,gitee 官方仓库;build.sh 自动同步样例进去再编译) |
-| `backend/` | Rust 后端(axum + sqlx + reqwest):`src/`、`migrations/`(PostgreSQL 建库脚本,启动自动执行)、`infra-up.sh`(起数据库) |
-| `build.sh` / `flash.sh` | Docker 一键编译 / 一键烧录 |
-| `gen-compdb.sh` | 重新生成 clangd 用的 compile_commands.json |
-| `bearpi-serial.ps1` | 串口日志查看脚本(Windows PowerShell) |
-| `tools/hiburn_windows/` | HiBurn 烧录工具(Windows 版) |
+| 功能 | 说明 |
+|------|------|
+| 光照监测 | BH1750 传感器实时采集，5点中值滤波降噪 |
+| 自动控制 | 光照 < 260 lux 开灯，> 340 lux 关灯（迟滞防抖） |
+| 手动控制 | 前端远程开关灯，通过 IoTDA 下发指令 |
+| 阈值配置 | 前端可调光照阈值 |
+| 设备管理 | 添加/删除设备，查看在线状态 |
+| 告警管理 | 设备离线告警，支持标记已处理/恢复 |
+| 审计日志 | 记录每次控制操作（自动/手动） |
+| 登录认证 | JWT + Argon2id 密码哈希 |
+| 智能问答 | 基于知识库的维护助手（意图识别 + 数据库查询） |
+| 历史趋势 | ECharts 光照折线图（1h/24h/7d/30d） |
 
 ## 快速开始
 
-### 0. 克隆
+### 环境要求
 
-本仓库用 **git submodule** 携带 OpenHarmony 源码树,克隆时必须加 `--recursive`:
+| 工具 | 版本 | 用途 |
+|------|------|------|
+| Git | 任意 | 克隆仓库 |
+| Node.js | v18+ | 前端运行 |
+| Rust | 最新 | 后端编译 |
+| Docker | 最新 | PostgreSQL 数据库 |
+| WSL2 | 可选 | 固件编译 |
 
-```bash
-git clone --recursive <仓库地址>
-# 已克隆的补上:git submodule update --init
-```
-
-### 1. 固件
-
-前置:WSL2 Ubuntu + Docker(镜像 `openharmony/openharmony-docker:0.0.3`)。
-
-复制 `C3_e53_sc1_pls/include/app_config.example.h` 为 `app_config.h`,填入你的 Wi-Fi SSID/密码和 IoTDA 设备 ID/密钥(该文件被 .gitignore 忽略,不会进仓库);IoTDA 实例设备侧域名改 `C3_e53_sc1_pls/e53_sc1_example.c` 顶部的 `CONFIG_APP_SERVERIP`。然后:
+### 1. 克隆仓库
 
 ```bash
-./build.sh        # 编译(自动同步样例、启用 BUILD.gn)
-./flash.sh 4      # 烧录:HiBurn 弹出后按一下开发板 RESET,烧完再按一次 RESET 运行
-```
-
-串口日志(115200):`pwsh -File bearpi-serial.ps1`
-
-### 2. 后端
-
-数据库是 **PostgreSQL**;表结构由后端启动时自动创建(`migrations/`,sqlx 迁移),**无需手工导入任何 SQL**。
-
-```bash
-backend/infra-up.sh         # 启动 PostgreSQL(容器 streetlight-postgres)
-cd backend
-cp .env.example .env        # 填华为云 AK/SK、项目 ID、实例应用侧域名、区域(含 JWT_SECRET)
-cargo run                   # 监听 8080,首次启动自动建表并创建引导管理员
-```
-
-首次启动时若账号表为空,后端按 `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD` 创建管理员
-(默认 `admin` / `admin123`,仅开发用)。浏览器打开 `http://127.0.0.1:8080/docs` 即 Swagger UI:
-先调 `POST /api/auth/login` 拿 token,点右上角 **Authorize** 填入 `Bearer <token>` 即可在线调试所有接口。
-
-### 3. REST API(端口 8080)
-
-除 `/api/health`、`/api/auth/login`、`/docs` 外,其余接口都需要请求头 `Authorization: Bearer <token>`。
-权限码在登录响应的 `permissions` 里;路由需要的权限见下表(路灯管理员拥有全部权限)。
-
-| 方法 | 路径 | 权限码 | 说明 |
-|---|---|---|---|
-| GET | `/api/health` | 公开 | 健康检查 |
-| POST | `/api/auth/login` | 公开 | 登录,返回 token / 用户 / 角色 / 权限码 |
-| GET | `/api/auth/me` | 登录 | 当前登录用户 |
-| GET | `/api/dashboard` | `device:status` | 首页聚合(设备/告警/24h 光照与指令统计) |
-| GET/POST | `/api/devices` | `device:status` / `device:manage` | 设备列表 / 注册(可带 name、location) |
-| PATCH/DELETE | `/api/devices/:id` | `device:manage` | 修改设备资料 / 删除设备及全部关联数据 |
-| GET | `/api/devices/:id/lux/latest` | `luminance:monitor` | 实时光照 |
-| GET | `/api/devices/:id/lux/history?from=&to=` | `luminance:history` | 历史光照(RFC3339,倒序,上限 5000) |
-| GET | `/api/devices/:id/lux/stats?from=&to=` | `luminance:history` | 条数 / 最低 / 最高 / 平均 / 最新 |
-| GET | `/api/lux/latest` | `luminance:monitor` | 所有设备最新光照 |
-| POST | `/api/devices/:id/lamp` | `control:manual` | 控灯 `{"action":"on\|off\|auto"}` |
-| GET | `/api/devices/:id/commands?from=&to=&limit=` | `command:log` | 单设备指令留痕 |
-| GET | `/api/commands?device_id=&from=&to=&limit=` | `command:log` | 全局指令留痕 |
-| GET/PUT | `/api/devices/:id/threshold` | `config:threshold` | 阈值查询/下发(0~10000) |
-| GET | `/api/alarms?device_id=&resolved=&from=&to=&type=&limit=` | `alarm:log` | 告警记录 |
-| PATCH | `/api/alarms/:id` | `alarm:log` | `{"resolved":true/false}` 处理 / 恢复告警 |
-| GET/POST | `/api/users` | `user:manage` | 账号列表 / 新增(密码 6~64 位) |
-| DELETE | `/api/users/:id` | `user:manage` | 删除账号(不能删自己) |
-| GET | `/api/roles` | `user:manage` | 角色列表 |
-| GET | `/api/permissions` | `user:manage` | 权限点列表 |
-| PUT | `/api/roles/:id/permissions` | `user:manage` | 更新角色-权限映射 |
-
-注意:控灯/阈值是透传 IoTDA 北向的,设备离线时北向拒绝(返回 502 带原因);`sent` 仅表示北向已受理,不代表灯已动作。
-
-## 部署上线(云服务器)
-
-前提:已完成上方「快速开始」的固件烧录,并按「IoTDA 侧配置要点」在华为云创建好实例 / 产品模型 / 设备 / AK-SK。
-
-### 1. 安装 Docker
-
-```bash
-curl -fsSL https://get.docker.com | sh
-sudo usermod -aG docker $USER   # 重新登录后生效
-docker compose version
-```
-
-### 2. 拉代码并配置 .env
-
-```bash
-git clone https://github.com/AXARINE/zhihui_ludeng_project.git
-cd zhihui_ludeng_project/backend
-cp .env.example .env
-vim .env
-```
-
-`.env` 关键项:
-
-```bash
-HUAWEI_AK=你的访问密钥
-HUAWEI_SK=你的密钥
-HUAWEI_PROJECT_ID=你的项目ID
-HUAWEI_IOTDA_ENDPOINT=xxx.st1.iotda-app.cn-south-1.myhuaweicloud.com
-HUAWEI_IOTDA_REGION=cn-south-1
-
-# 生产必改:用 `openssl rand -hex 32` 生成后填进来
-JWT_SECRET=<openssl rand -hex 32 的输出>
-
-# 首次启动自动创建的管理员(上线前就设成强密码)
-BOOTSTRAP_ADMIN_USERNAME=admin
-BOOTSTRAP_ADMIN_PASSWORD=你的强密码
-```
-
-### 3. 裁剪 docker-compose.yml(生产版)
-
-- 删除 `nocodb` 整个服务(它只是本地看数据用的);
-- 删除 postgres 的 `ports: "5432:5432"` 映射,数据库绝不对外;
-- 后端保留 `8080:8080`,之后由反向代理收敛到 443。
-
-### 4. 启动
-
-```bash
-docker compose up -d --build
-docker compose ps
-docker logs -f streetlight-backend
-```
-
-看到 `database migrated` 与 `http listening on 0.0.0.0:8080 (Swagger UI: /docs)` 即成功;首次启动自动建表并创建引导管理员。
-
-### 5. HTTPS 反向代理(推荐 Caddy)
-
-```bash
-sudo apt install -y caddy
-```
-
-`/etc/caddy/Caddyfile`:
-
-```
-streetlight.example.com {
-    reverse_proxy 127.0.0.1:8080
-}
-```
-
-```bash
-sudo systemctl reload caddy
-```
-
-之后访问 `https://streetlight.example.com/docs`;安全组只放行 443。
-
-### 6. 上线加固
-
-- `JWT_SECRET` 必须替换为随机值,不要使用开发默认值;
-- `BOOTSTRAP_ADMIN_PASSWORD` 首次启动前设成强密码;上线后建议用 API 创建正式账号并删除默认 admin(后端暂无改密码接口);
-- 若前端与后端不同域名,CORS 目前为 `allow_origin(Any)`,生产应在 `backend/src/main.rs` 改成前端域名;同域(前端放 Caddy 后)则无需处理;
-- 云服务器安全组只放行 80/443,不放行 5432/8080。
-
-### 7. 验收清单
-
-| 检查项 | 方法 |
-|---|---|
-| 设备在线 | IoTDA 控制台设备状态 = 在线 |
-| 数据入库 | `/docs` → login → Authorize → `GET /api/dashboard`,`reports_24h` 在涨 |
-| 光照统计 | `GET /api/devices/{id}/lux/stats` |
-| 远程控灯 | `POST /api/devices/{id}/lamp` `{"action":"on"}`,补光灯亮 |
-| 离线告警 | 拔设备电 → 告警新增;重新上电 → 自动消解 |
-| 权限隔离 | 市政账号(`role_id:1`)建设备应返回 403 |
-
-### 8. 日常更新
-
-```bash
+git clone https://github.com/shic0love117-alt/zhihui_ludeng_project.git
 cd zhihui_ludeng_project
-git pull
-cd backend
-docker compose up -d --build   # 新 migration 自动执行
 ```
 
-固件更新:`./build.sh && ./flash.sh 4`。
+### 2. 启动数据库
 
-## IoTDA 侧配置要点
+```bash
+docker run -d --name streetlight-postgres \
+  -e POSTGRES_PASSWORD=postgres \
+  -e POSTGRES_DB=streetlight \
+  -p 5432:5432 \
+  postgres:16
+```
 
-1. 创建**标准版实例**,在"实例 → 接入信息"记下**设备侧域名**(填固件,本项目使用 1883 明文 MQTT,不要用 8883,原因见"安全说明")和**应用侧域名**(填 `.env`);标准版没有区域共享域名。
-2. 创建产品,模型定义服务 `Light`:属性 `Luminance`(int)、`LightStatus`(string)、`Threshold`(int,**必须可读可写**);命令 `Light_Control_Led`(参数 `Led`:ON/OFF/AUTO)。
-3. 注册设备,拿到设备 ID / 密钥(填 `app_config.h`)。
-4. IAM 创建用户(AK/SK),用户组挂 IoTDA 权限(如 `IoTDA:*:*`),授权有数分钟传播延迟。
+### 3. 启动后端
 
-## 硬件连接
+```bash
+cd server/backend
+cargo run --release
+```
 
-- BH1750:I2C1(GPIO0=SDA / GPIO1=SCL,400kHz),地址 0x23,连续低分辨率模式
-- 补光灯:GPIO7,高电平点亮
-- 日志:printf → UART0 → 板载 CH340E → USB → Windows COM 口
-- 注意:Hi3861 仅支持 2.4GHz Wi-Fi
+首次编译约 5-10 分钟，看到 `listening on 0.0.0.0:8080` 即成功。
 
-## 安全说明
+数据库表会自动创建，管理员账号自动初始化：
+- 用户名：`admin`
+- 密码：`admin123`
 
-- 设备 → IoTDA 使用 1883 明文 MQTT。**不要启用 8883 MQTTS**:本工程 iot_link 内置的 mbedtls 在 Hi3861 上运行 TLS 存在稳定性问题(证书解析阶段触发内核异常,单条 SUBSCRIBE 最长 90s 后失败,断开清理阶段 panic,设备陷入重启循环,云端命令下发超时 IOTDA.014111;2026-08-24 实测)。根 CA 保留在 `include/iotda_ca.h` 备用,问题解决前不要启用。
-- Wi-Fi 密码与设备密钥只存在于本地 `app_config.h`(被 .gitignore 忽略),不进任何 git 仓库。
+### 4. 启动前端
 
-## 已知坑(脚本已内置修复,勿回退)
+```bash
+cd frontend
+npm install
+npm run dev
+```
 
-- HiBurn 读不了 `\\wsl.localhost` UNC 路径 → flash.sh 暂存到 Windows `%TEMP%` 再烧;COM 参数必须数字格式 `-com:4`
-- 串口独占:HiBurn 烧录时看不了日志
-- Docker Desktop 读不了 WSL 路径 bind mount → 数据库用 WSL 原生 docker(`infra-up.sh`)
-- 充电器供电时若上电不启动,按一下 RESET
+打开浏览器访问 http://localhost:5173 ，用 admin / admin123 登录。
 
-## 迭代流程
+### 5. 固件编译（可选）
 
-- 固件:改 `C3_e53_sc1_pls/` → `./build.sh` → `./flash.sh 4` → RESET ×2 → 串口验证
-- 后端:改 `backend/` → `cargo build` → curl 验证 REST API
-- 数据库 schema:未上线前可直接改 `backend/migrations/0001_init.sql` 并清卷重建;上线后必须新建递增迁移
+需要 WSL2 + Docker：
+
+```bash
+# Windows PowerShell
+wsl
+
+# WSL 中
+cd /mnt/e/路灯项目/AXARINE_repo
+bash build.sh
+```
+
+编译产物在 `out/` 目录，通过 HiBurn 烧录到 BearPi 开发板。
+
+## 项目结构
+
+```
+├── AXARINE_repo/                # 固件代码（OpenHarmony）
+│   ├── C3_e53_sc1_pls/
+│   │   └── e53_sc1_example.c   # 主程序（传感器读取 + MQTT 上报）
+│   └── build.sh                 # Docker 编译脚本
+│
+├── server/backend/              # Rust 后端（axum + sqlx）
+│   ├── src/
+│   │   ├── main.rs             # 入口（CORS、迁移、自动建表）
+│   │   ├── api.rs              # REST API（设备、告警、问答）
+│   │   ├── auth.rs             # JWT 认证
+│   │   ├── iothub.rs           # 华为云 IoTDA 北向接口
+│   │   └── poll.rs             # 设备状态轮询
+│   ├── migrations/              # 数据库迁移
+│   └── Cargo.toml
+│
+└── frontend/                    # Vue3 前端
+    ├── src/
+    │   ├── pages/               # 页面组件
+    │   │   ├── Dashboard.vue    # 首页大屏
+    │   │   ├── DeviceList.vue   # 设备列表
+    │   │   ├── AlarmList.vue    # 告警列表
+    │   │   ├── AssistantQA.vue  # 智能问答
+    │   │   ├── Login.vue        # 登录页
+    │   │   └── ...
+    │   ├── api/device.js        # API 接口
+    │   └── store/               # Pinia 状态管理
+    └── vite.config.js           # Vite 配置（代理）
+```
+
+## 环境变量
+
+后端 `.env` 文件（`server/backend/.env`）：
+
+```env
+DATABASE_URL=postgres://postgres:postgres@localhost:5432/streetlight
+HUAWEI_IOTHUB_ENDPOINT=https://xxx.iotda-app.cn-south-1.myhuaweicloud.com
+HUAWEI_IOTHUB_INSTANCE_ID=your_instance_id
+HUAWEI_IOTHUB_DEVICE_ID=your_device_id
+HUAWEI_IOTHUB_ACCESS_KEY=your_access_key
+HUAWEI_IOTHUB_ACCESS_SECRET=your_access_secret
+JWT_SECRET=your_jwt_secret_key
+```
+
+前端 `.env` 文件（`frontend/.env`）：
+
+```env
+VITE_USE_MOCK=false
+VITE_DEVICE_ID=your_device_id
+```
+
+## 技术栈
+
+| 层级 | 技术 |
+|------|------|
+| 硬件 | BearPi-HM Nano (Hi3861, RISC-V) + E53_SC1 (BH1750) |
+| 云平台 | 华为云 IoTDA（标准实例，南向 MQTT + 北向 HTTPS） |
+| 后端 | Rust (axum + sqlx + reqwest) |
+| 数据库 | PostgreSQL 16 |
+| 前端 | Vue3 + Vite + Element Plus + Pinia + ECharts |
+| 认证 | JWT + Argon2id |
+
+## 常见问题
+
+**Q: 后端启动报 "Address already in use"**
+A: 端口被占用，关掉代理软件的全局模式，改用规则模式。
+
+**Q: 前端登录失败**
+A: 确认后端已启动（8080 端口），检查浏览器控制台报错。
+
+**Q: WSL 中 cargo 命令找不到**
+A: 执行 `source ~/.cargo/env` 或重新打开 WSL 终端。
+
+**Q: 固件编译报 symlink 错误**
+A: build.sh 已包含自动修复，确保用 WSL2 运行。
