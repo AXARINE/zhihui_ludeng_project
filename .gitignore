@@ -18,3 +18,5 @@ AGENTS.md
 credentials.csv
 DEVICES-*.txt
 C3_e53_sc1_pls/include/app_config.h
+
+frontend_new/node_modules/
