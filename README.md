@@ -46,7 +46,7 @@
 ### 1. 克隆仓库
 
 ```bash
-git clone https://github.com/shic0love117-alt/zhihui_ludeng_project.git
+git clone https://github.com/AXARINE/zhihui_ludeng_project.git
 cd zhihui_ludeng_project
 ```
 
@@ -76,7 +76,7 @@ cargo run --release
 ### 4. 启动前端
 
 ```bash
-cd frontend
+cd frontend_vue
 npm install
 npm run dev
 ```
@@ -116,7 +116,7 @@ bash build.sh
 │   ├── migrations/              # 数据库迁移
 │   └── Cargo.toml
 │
-└── frontend/                    # Vue3 前端
+└── frontend_vue/                # Vue3 前端
     ├── src/
     │   ├── pages/               # 页面组件
     │   │   ├── Dashboard.vue    # 首页大屏
@@ -144,7 +144,7 @@ HUAWEI_IOTHUB_ACCESS_SECRET=your_access_secret
 JWT_SECRET=your_jwt_secret_key
 ```
 
-前端 `.env` 文件（`frontend/.env`）：
+前端 `.env` 文件（`frontend_vue/.env`）：
 
 ```env
 VITE_USE_MOCK=false
