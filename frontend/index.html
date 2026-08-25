@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>智慧路灯监控台</title>
+<title>智慧路灯管理系统</title>
 <script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.5.0/echarts.min.js"></script>
 <style>
   :root {
@@ -11,29 +11,45 @@
     --ok:#0FA46E; --warn:#E8A13D; --danger:#E5484D; --off:#8A94A6;
     --bg:#F5F7FA; --card:#FFFFFF; --border:#E8ECF1;
     --text:#1F2937; --muted:#6B7280;
+    --sidebar-bg:#17213A; --sidebar-text:#A9B4C8; --sidebar-active:#2F6FED;
   }
   * { margin:0; padding:0; box-sizing:border-box; }
   body { font-family:"PingFang SC","Microsoft YaHei",-apple-system,sans-serif; background:var(--bg); color:var(--text); font-size:14px; -webkit-font-smoothing:antialiased; }
-  header { display:flex; align-items:center; justify-content:space-between; padding:16px 28px; background:var(--card); border-bottom:1px solid var(--border); box-shadow:0 1px 2px rgba(16,24,40,.04); position:sticky; top:0; z-index:50; }
-  header h1 { font-size:18px; font-weight:600; color:var(--primary); display:flex; align-items:center; gap:8px; }
-  header h1::before { content:""; width:8px; height:20px; border-radius:3px; background:linear-gradient(180deg,var(--primary),#5B8DEF); }
-  header select { padding:7px 12px; border:1px solid var(--border); border-radius:8px; font-size:13px; min-width:260px; background:#fff; color:var(--text); outline:none; }
-  header select:focus { border-color:var(--primary); }
-  .container { max-width:1240px; margin:0 auto; padding:22px 28px; display:flex; gap:18px; align-items:flex-start; }
-  .main { flex:1; min-width:0; }
-  .side { width:370px; flex-shrink:0; position:sticky; top:78px; height:calc(100vh - 100px); }
-  .side .panel { height:100%; display:flex; flex-direction:column; margin-bottom:0; }
-  .side .panel h3 { flex-shrink:0; }
-  .side .btn-row { flex-shrink:0; }
+  .layout { display:flex; min-height:100vh; }
+  /* ---------- 左侧导航 ---------- */
+  .sidebar { width:200px; flex-shrink:0; background:var(--sidebar-bg); color:var(--sidebar-text); display:flex; flex-direction:column; position:fixed; top:0; bottom:0; left:0; z-index:60; }
+  .sidebar .logo { padding:20px 18px; font-size:16px; font-weight:600; color:#fff; border-bottom:1px solid rgba(255,255,255,.08); display:flex; align-items:center; gap:8px; }
+  .sidebar .logo::before { content:""; width:8px; height:20px; border-radius:3px; background:var(--primary); }
+  .sidebar nav { flex:1; padding:14px 10px; overflow-y:auto; }
+  .sidebar nav a { display:flex; align-items:center; gap:10px; padding:11px 14px; margin-bottom:4px; border-radius:8px; color:var(--sidebar-text); text-decoration:none; font-size:14px; cursor:pointer; transition:background .15s,color .15s; }
+  .sidebar nav a:hover { background:rgba(255,255,255,.06); color:#fff; }
+  .sidebar nav a.active { background:var(--sidebar-active); color:#fff; font-weight:500; }
+  .sidebar nav a .ico { font-size:16px; }
+  .sidebar .side-foot { padding:14px 18px; font-size:12px; color:#5C6B88; border-top:1px solid rgba(255,255,255,.08); }
+  /* ---------- 主区 ---------- */
+  .main { flex:1; margin-left:200px; min-width:0; display:flex; flex-direction:column; }
+  .topbar { height:56px; background:var(--card); border-bottom:1px solid var(--border); display:flex; align-items:center; justify-content:space-between; padding:0 24px; position:sticky; top:0; z-index:50; }
+  .topbar .title { font-size:16px; font-weight:600; }
+  .topbar .user-box { display:flex; align-items:center; gap:12px; }
+  .topbar .avatar { width:32px; height:32px; border-radius:50%; background:var(--primary); color:#fff; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:600; }
+  .topbar .user-meta { line-height:1.3; }
+  .topbar .user-meta .name { font-size:13px; font-weight:500; }
+  .topbar .user-meta .role { font-size:11px; color:var(--muted); }
+  .topbar .logout { border:1px solid var(--border); border-radius:7px; background:#fff; padding:6px 14px; font-size:13px; cursor:pointer; color:var(--text); }
+  .topbar .logout:hover { border-color:var(--danger); color:var(--danger); }
+  .content { padding:22px 24px; max-width:1280px; width:100%; margin:0 auto; }
+  .page { display:none; }
+  .page.active { display:block; }
+  /* ---------- 通用组件 ---------- */
   .cards { display:grid; grid-template-columns:repeat(5,1fr); gap:16px; margin-bottom:18px; }
   .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:18px; box-shadow:0 1px 3px rgba(16,24,40,.06); transition:transform .15s ease, box-shadow .15s ease; }
   .card:hover { transform:translateY(-2px); box-shadow:0 6px 16px rgba(16,24,40,.08); }
   .card .label { font-size:12px; color:var(--muted); margin-bottom:8px; letter-spacing:.3px; }
-  .card .value { font-size:30px; font-weight:700; letter-spacing:-.5px; color:var(--text); }
+  .card .value { font-size:30px; font-weight:700; letter-spacing:-.5px; }
   .card .value.on { color:var(--ok); } .card .value.off { color:var(--off); } .card .value.warn { color:var(--warn); }
   .card .sub { font-size:12px; color:var(--muted); margin-top:4px; }
   .panel { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:18px 20px; margin-bottom:18px; box-shadow:0 1px 3px rgba(16,24,40,.06); }
-  .panel h3 { font-size:15px; font-weight:600; margin-bottom:14px; color:var(--text); display:flex; align-items:center; gap:8px; }
+  .panel h3 { font-size:15px; font-weight:600; margin-bottom:14px; display:flex; align-items:center; gap:8px; }
   .panel h3::before { content:""; width:4px; height:14px; border-radius:2px; background:var(--primary); }
   .panel h3.spread { justify-content:space-between; }
   .btn-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
@@ -50,12 +66,13 @@
   .btn.active { background:var(--primary); color:#fff; border-color:var(--primary); }
   .btn.danger { color:var(--danger); border-color:var(--danger); }
   .btn.danger:hover { background:var(--danger); color:#fff; }
-  .threshold-box { display:flex; gap:8px; align-items:center; }
   input, select { border:1px solid var(--border); border-radius:8px; font-size:13px; padding:8px 10px; outline:none; background:#fff; color:var(--text); }
   input:focus, select:focus { border-color:var(--primary); }
   .threshold-box input { width:100px; }
   .range-bar { display:flex; gap:8px; margin-bottom:12px; }
-  #chart { width:100%; height:320px; }
+  .charts-2 { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:900px){ .charts-2 { grid-template-columns:1fr; } }
+  #chart { width:100%; height:340px; }
   table { width:100%; border-collapse:collapse; font-size:13px; }
   th,td { text-align:left; padding:10px 12px; border-bottom:1px solid #F0F2F5; }
   th { color:var(--muted); font-weight:500; background:#F9FAFB; font-size:12px; }
@@ -65,117 +82,164 @@
   .tag { display:inline-block; padding:2px 10px; border-radius:10px; font-size:12px; }
   .tag.unsolved { background:#FDEBEC; color:var(--danger); }
   .tag.solved { background:#E6F6EF; color:var(--ok); }
+  .collapse { display:none; }
+  .user-form input { width:110px; }
+  .user-form select { width:120px; }
   #toast { position:fixed; top:22px; left:50%; transform:translateX(-50%); background:rgba(17,24,39,.92); color:#fff; padding:10px 22px; border-radius:10px; font-size:13px; opacity:0; transition:opacity .3s; z-index:99; pointer-events:none; box-shadow:0 4px 14px rgba(0,0,0,.18); }
   #loginMask { position:fixed; inset:0; background:rgba(17,24,39,.45); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center; z-index:100; }
   #loginBox { background:#fff; border-radius:16px; padding:36px 40px; width:340px; box-shadow:0 12px 40px rgba(0,0,0,.22); }
-  #loginBox h2 { font-size:18px; margin-bottom:20px; color:var(--text); text-align:center; }
+  #loginBox h2 { font-size:18px; margin-bottom:20px; text-align:center; }
   #loginBox input { width:100%; padding:11px 12px; margin-bottom:12px; font-size:14px; }
   #loginBox button { width:100%; padding:11px; border:none; border-radius:9px; background:var(--primary); color:#fff; font-size:14px; cursor:pointer; }
   #loginBox button:hover { opacity:.9; }
   #loginErr { color:var(--danger); font-size:12px; margin-bottom:10px; min-height:16px; text-align:center; }
-  #chatBox { flex:1; min-height:220px; overflow-y:auto; background:#FAFBFC; border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:10px; font-size:13px; line-height:1.75; white-space:pre-wrap; }
+  /* ---------- 问答页 ---------- */
+  #chatBox { height:calc(100vh - 260px); min-height:300px; overflow-y:auto; background:#FAFBFC; border:1px solid var(--border); border-radius:10px; padding:14px; margin-bottom:12px; font-size:13px; line-height:1.75; white-space:pre-wrap; }
   #chatBox div.qa-user { margin-bottom:8px; }
   #chatBox div.qa-bot { margin-bottom:12px; }
   #chatBox b.q { color:var(--primary); } #chatBox b.a { color:var(--ok); }
-  #askInput { flex:1; min-width:0; }
-  .collapse { display:none; }
-  .user-form input { width:110px; }
-  .user-form select { width:120px; }
+  #askInput { flex:1; min-width:200px; padding:10px 12px; font-size:14px; }
 </style>
 </head>
 <body>
 <div id="loginMask">
   <div id="loginBox">
-    <h2>智慧路灯监控台 · 登录</h2>
+    <h2>智慧路灯管理系统 · 登录</h2>
     <div id="loginErr"></div>
     <input id="loginUser" placeholder="用户名" value="admin">
     <input id="loginPass" type="password" placeholder="密码">
     <button onclick="doLogin()">登 录</button>
   </div>
 </div>
-<header>
-  <h1>智慧路灯监控台</h1>
-  <div>
-    <span style="font-size:13px;color:var(--muted);margin-right:8px">选择设备</span>
-    <select id="deviceSelect" onchange="selectDevice(this.value)"></select>
-  </div>
-</header>
 
-<div class="container">
+<div class="layout">
+  <aside class="sidebar">
+    <div class="logo">智慧路灯管理系统</div>
+    <nav>
+      <a class="active" data-page="dashboard" onclick="showPage('dashboard',this)"><span class="ico">📊</span>仪表盘</a>
+      <a data-page="devices" onclick="showPage('devices',this)"><span class="ico">💡</span>设备管理</a>
+      <a data-page="alarms" onclick="showPage('alarms',this)"><span class="ico">🚨</span>告警管理</a>
+      <a data-page="accounts" onclick="showPage('accounts',this)"><span class="ico">👤</span>账号管理</a>
+      <a data-page="assistant" onclick="showPage('assistant',this)"><span class="ico">🤖</span>智能问答</a>
+    </nav>
+    <div class="side-foot">BearPi-HM Nano · 华为云 IoTDA</div>
+  </aside>
+
   <div class="main">
-    <div class="cards">
-      <div class="card"><div class="label">光照强度</div><div class="value" id="lux">--</div><div class="sub">单位：lux</div></div>
-      <div class="card"><div class="label">灯状态</div><div class="value" id="lamp">--</div></div>
-      <div class="card"><div class="label">控制模式</div><div class="value" id="mode">--</div></div>
-      <div class="card"><div class="label">设备状态</div><div class="value" id="status">--</div></div>
-      <div class="card"><div class="label">最近上报</div><div class="value" style="font-size:17px" id="lastSeen">--</div></div>
-    </div>
-
-    <div class="panel">
-      <h3>设备控制</h3>
-      <div class="btn-row">
-        <button class="btn on" onclick="setLamp('on')">开灯</button>
-        <button class="btn off" onclick="setLamp('off')">关灯</button>
-        <button class="btn auto" onclick="setLamp('auto')">自动联动</button>
-        <span style="width:20px"></span>
-        <span style="font-size:13px;color:var(--muted)">光照联动阈值</span>
-        <div class="threshold-box">
-          <input type="number" id="thresholdInput" min="0" max="1000" step="10">
-          <span style="font-size:13px;color:var(--muted)">lux</span>
-          <button class="btn" id="saveThresholdBtn" onclick="saveThreshold()">保存阈值</button>
+    <header class="topbar">
+      <span class="title" id="pageTitle">仪表盘</span>
+      <div class="user-box">
+        <div class="avatar" id="userAvatar">管</div>
+        <div class="user-meta">
+          <div class="name" id="userName">--</div>
+          <div class="role" id="userRole">--</div>
         </div>
+        <button class="logout" onclick="logout()">退出登录</button>
       </div>
-      <div style="margin-top:10px;font-size:12px;color:#9AA3AF">提示：阈值下发/控灯首次约需 20~35 秒（IoTDA 下行通道预热），下发后请稍候。</div>
-    </div>
+    </header>
 
-    <div class="panel">
-      <h3>光照趋势</h3>
-      <div class="range-bar">
-        <button class="btn small active" data-h="1" onclick="setRange(1,this)">近1小时</button>
-        <button class="btn small" data-h="6" onclick="setRange(6,this)">近6小时</button>
-        <button class="btn small" data-h="24" onclick="setRange(24,this)">近24小时</button>
-      </div>
-      <div id="chart"></div>
-    </div>
+    <div class="content">
+      <!-- 仪表盘 -->
+      <section class="page active" id="page-dashboard">
+        <div class="cards">
+          <div class="card"><div class="label">光照强度</div><div class="value" id="lux">--</div><div class="sub">单位：lux</div></div>
+          <div class="card"><div class="label">灯状态</div><div class="value" id="lamp">--</div></div>
+          <div class="card"><div class="label">控制模式</div><div class="value" id="mode">--</div></div>
+          <div class="card"><div class="label">设备状态</div><div class="value" id="status">--</div></div>
+          <div class="card"><div class="label">最近上报</div><div class="value" style="font-size:17px" id="lastSeen">--</div></div>
+        </div>
+        <div class="panel">
+          <h3>光照趋势</h3>
+          <div class="range-bar">
+            <button class="btn small active" data-h="1" onclick="setRange(1,this)">近1小时</button>
+            <button class="btn small" data-h="6" onclick="setRange(6,this)">近6小时</button>
+            <button class="btn small" data-h="24" onclick="setRange(24,this)">近24小时</button>
+          </div>
+          <div id="chart"></div>
+        </div>
+        <div class="charts-2">
+          <div class="panel">
+            <h3>近 7 天告警趋势</h3>
+            <div id="chartAlarm" style="height:270px"></div>
+          </div>
+          <div class="panel">
+            <h3>设备在线概览</h3>
+            <div id="chartDevice" style="height:270px"></div>
+          </div>
+        </div>
+        <div class="panel">
+          <h3 class="spread">历史光照数据<button class="btn small" id="histToggle" onclick="toggleHist()">展开</button></h3>
+          <div id="histWrap" class="collapse">
+            <table><thead><tr><th>#</th><th>光照 (lux)</th><th>时间</th></tr></thead><tbody id="histTbody"></tbody></table>
+          </div>
+        </div>
+      </section>
 
-    <div class="panel">
-      <h3 class="spread">历史光照数据<button class="btn small" id="histToggle" onclick="toggleHist()">展开</button></h3>
-      <div id="histWrap" class="collapse">
-        <table><thead><tr><th>#</th><th>光照 (lux)</th><th>时间</th></tr></thead><tbody id="histTbody"></tbody></table>
-      </div>
-    </div>
+      <!-- 设备管理 -->
+      <section class="page" id="page-devices">
+        <div class="panel">
+          <h3>设备控制</h3>
+          <div class="btn-row" style="margin-bottom:12px">
+            <span style="font-size:13px;color:var(--muted)">当前设备</span>
+            <select id="deviceSelect" onchange="selectDevice(this.value)" style="min-width:280px"></select>
+          </div>
+          <div class="btn-row">
+            <button class="btn on" onclick="setLamp('on')">开灯</button>
+            <button class="btn off" onclick="setLamp('off')">关灯</button>
+            <button class="btn auto" onclick="setLamp('auto')">自动联动</button>
+            <span style="width:20px"></span>
+            <span style="font-size:13px;color:var(--muted)">光照联动阈值</span>
+            <div class="threshold-box">
+              <input type="number" id="thresholdInput" min="0" max="1000" step="10">
+              <span style="font-size:13px;color:var(--muted)">lux</span>
+              <button class="btn" id="saveThresholdBtn" onclick="saveThreshold()">保存阈值</button>
+            </div>
+          </div>
+          <div style="margin-top:10px;font-size:12px;color:#9AA3AF">提示：阈值下发/控灯首次约需 20~35 秒（IoTDA 下行通道预热），下发后请稍候。</div>
+        </div>
+        <div class="panel">
+          <h3>设备列表</h3>
+          <table><thead><tr><th>设备ID</th><th>名称</th><th>位置</th><th>状态</th><th>灯</th><th>模式</th><th>最近上报</th></tr></thead><tbody id="devTbody"></tbody></table>
+        </div>
+      </section>
 
-    <div class="panel">
-      <h3>告警记录</h3>
-      <table><thead><tr><th>类型</th><th>内容</th><th>时间</th><th>状态</th></tr></thead><tbody id="alarmTbody"></tbody></table>
-    </div>
+      <!-- 告警管理 -->
+      <section class="page" id="page-alarms">
+        <div class="panel">
+          <h3>告警记录</h3>
+          <table><thead><tr><th>类型</th><th>内容</th><th>时间</th><th>状态</th></tr></thead><tbody id="alarmTbody"></tbody></table>
+        </div>
+      </section>
 
-    <div class="panel">
-      <h3>设备列表</h3>
-      <table><thead><tr><th>设备ID</th><th>名称</th><th>位置</th><th>状态</th><th>灯</th><th>模式</th><th>最近上报</th></tr></thead><tbody id="devTbody"></tbody></table>
-    </div>
+      <!-- 账号管理 -->
+      <section class="page" id="page-accounts">
+        <div class="panel">
+          <h3>新增账号</h3>
+          <div class="btn-row user-form">
+            <input id="newUsername" placeholder="用户名">
+            <input id="newPassword" type="password" placeholder="密码">
+            <input id="newRealName" placeholder="姓名">
+            <select id="newRole"></select>
+            <button class="btn" onclick="createUser()">新增账号</button>
+          </div>
+        </div>
+        <div class="panel">
+          <h3>账号列表</h3>
+          <table><thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody id="userTbody"></tbody></table>
+        </div>
+      </section>
 
-    <div class="panel">
-      <h3>账号管理</h3>
-      <div class="btn-row user-form" style="margin-bottom:14px">
-        <input id="newUsername" placeholder="用户名">
-        <input id="newPassword" type="password" placeholder="密码">
-        <input id="newRealName" placeholder="姓名">
-        <select id="newRole"></select>
-        <button class="btn" onclick="createUser()">新增账号</button>
-      </div>
-      <table><thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody id="userTbody"></tbody></table>
-    </div>
-  </div>
-
-  <div class="side">
-    <div class="panel">
-      <h3>维护智能问答</h3>
-      <div id="chatBox"></div>
-      <div class="btn-row">
-        <input id="askInput" placeholder="例如：最近有哪些告警？" onkeydown="if(event.key==='Enter')askAssistant()">
-        <button class="btn" onclick="askAssistant()">发送</button>
-      </div>
+      <!-- 智能问答 -->
+      <section class="page" id="page-assistant">
+        <div class="panel">
+          <h3>维护智能问答</h3>
+          <div id="chatBox"></div>
+          <div class="btn-row">
+            <input id="askInput" placeholder="例如：最近有哪些告警？路灯频繁开关怎么办？" onkeydown="if(event.key==='Enter')askAssistant()">
+            <button class="btn" onclick="askAssistant()">发送</button>
+          </div>
+        </div>
+      </section>
     </div>
   </div>
 </div>
@@ -186,9 +250,15 @@
 var API = 'http://localhost:8080';
 var currentDevice = null;
 var TOKEN_KEY = 'sl_token';
+var USER_KEY = 'sl_user';
+var PAGES = {
+  dashboard:'仪表盘', devices:'设备管理', alarms:'告警管理', accounts:'账号管理', assistant:'智能问答'
+};
 
 function getToken(){ return localStorage.getItem(TOKEN_KEY) || ''; }
 function setToken(t){ localStorage.setItem(TOKEN_KEY, t); }
+function getStoredUser(){ try { return JSON.parse(localStorage.getItem(USER_KEY)||'null'); } catch(e){ return null; } }
+function setStoredUser(u){ localStorage.setItem(USER_KEY, JSON.stringify(u)); }
 function showLogin(){ document.getElementById('loginMask').style.display = 'flex'; }
 function hideLogin(){ document.getElementById('loginMask').style.display = 'none'; }
 
@@ -206,11 +276,43 @@ async function doLogin(){
     if (!r.ok) { err.textContent = '用户名或密码错误'; return; }
     var data = await r.json();
     setToken(data.token);
+    if (data.user) setStoredUser(data.user);
     hideLogin();
-    loadDevices();
-    loadUsers();
-    loadRoles();
+    afterLogin();
   } catch(e){ err.textContent = '无法连接后端: ' + e.message; }
+}
+
+function logout(){
+  localStorage.removeItem(TOKEN_KEY);
+  localStorage.removeItem(USER_KEY);
+  showLogin();
+}
+
+function renderUser(){
+  var u = getStoredUser();
+  if (!u) return;
+  document.getElementById('userName').textContent = u.username || u.real_name || '--';
+  document.getElementById('userRole').textContent = u.role_name || u.role_code || '--';
+  document.getElementById('userAvatar').textContent = (u.real_name || u.username || '管').charAt(0);
+}
+
+function showPage(name, el){
+  var pages = document.querySelectorAll('.page');
+  for (var i = 0; i < pages.length; i++) pages[i].className = 'page';
+  document.getElementById('page-' + name).className = 'page active';
+  var navs = document.querySelectorAll('.sidebar nav a');
+  for (var j = 0; j < navs.length; j++) navs[j].className = '';
+  if (el) el.className = 'active';
+  document.getElementById('pageTitle').textContent = PAGES[name] || name;
+  if (name === 'accounts') { loadUsers(); loadRoles(); }
+  if (name === 'alarms') { loadAlarms(); }
+}
+
+function afterLogin(){
+  renderUser();
+  loadDevices();
+  loadAlarmChart();
+  loadDeviceChart();
 }
 
 var chart = echarts.init(document.getElementById('chart'));
@@ -231,6 +333,61 @@ function setRange(h, btn){
   for (var i = 0; i < btns.length; i++) btns[i].className = 'btn small';
   btn.className = 'btn small active';
   loadHistory();
+}
+
+function fmtDay(d){
+  function p(n){ return (n<10?'0':'')+n; }
+  return p(d.getMonth()+1)+'-'+p(d.getDate());
+}
+
+// 近 7 天告警趋势（柱状图）
+var chartAlarm = echarts.init(document.getElementById('chartAlarm'));
+async function loadAlarmChart(){
+  try {
+    var rows = await api('/api/alarms');
+    var days = [];
+    for (var i = 6; i >= 0; i--) {
+      var d = new Date();
+      d.setDate(d.getDate() - i);
+      days.push(fmtDay(d));
+    }
+    var byDay = {};
+    (rows || []).forEach(function(a){
+      var k = fmtDay(new Date(a.created_at));
+      if (days.indexOf(k) >= 0) byDay[k] = (byDay[k] || 0) + 1;
+    });
+    chartAlarm.setOption({
+      tooltip: { trigger:'axis' },
+      grid: { left:40, right:20, top:20, bottom:30 },
+      xAxis: { type:'category', data:days, axisLine:{lineStyle:{color:'#D8DEE6'}} },
+      yAxis: { type:'value', minInterval:1, axisLine:{lineStyle:{color:'#D8DEE6'}} },
+      series: [{ name:'告警数', type:'bar', barWidth:28,
+                 itemStyle:{ color:'#E5484D', borderRadius:[4,4,0,0] },
+                 data: days.map(function(k){ return byDay[k] || 0; }) }]
+    }, true);
+  } catch(e){ console.warn('loadAlarmChart:', e); }
+}
+
+// 设备在线概览（环形图）
+var chartDevice = echarts.init(document.getElementById('chartDevice'));
+async function loadDeviceChart(){
+  try {
+    var list = await api('/api/devices');
+    var online = list.filter(function(d){ return d.status === 'online'; }).length;
+    var offline = list.length - online;
+    chartDevice.setOption({
+      tooltip: { trigger:'item', formatter:'{b}: {c} 台 ({d}%)' },
+      legend: { bottom:0 },
+      series: [{
+        type:'pie', radius:['46%','70%'], center:['50%','44%'],
+        label: { formatter:'{b}\n{c} 台' },
+        data: [
+          { name:'在线', value:online, itemStyle:{ color:'#0FA46E' } },
+          { name:'离线', value:offline, itemStyle:{ color:'#E5484D' } }
+        ]
+      }]
+    }, true);
+  } catch(e){ console.warn('loadDeviceChart:', e); }
 }
 
 function toast(msg){
@@ -489,12 +646,10 @@ async function saveThreshold(){
   }
 }
 
-// 启动：有 token 直接加载，否则显示登录
+// 启动：有 token 直接进入，否则显示登录
 if (getToken()) {
   hideLogin();
-  loadDevices();
-  loadUsers();
-  loadRoles();
+  afterLogin();
 } else {
   showLogin();
 }
@@ -502,6 +657,8 @@ setInterval(loadDevices, 15000);
 setInterval(function(){ if (currentDevice) { loadLatest(); } }, 10000);
 setInterval(loadHistory, 20000);
 setInterval(loadAlarms, 30000);
+setInterval(loadAlarmChart, 30000);
+setInterval(loadDeviceChart, 15000);
 </script>
 </body>
 </html>
