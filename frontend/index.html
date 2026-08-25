@@ -120,7 +120,7 @@
       <a data-page="devices" onclick="showPage('devices',this)"><span class="ico">💡</span>设备管理</a>
       <a data-page="alarms" onclick="showPage('alarms',this)"><span class="ico">🚨</span>告警管理</a>
       <a data-page="accounts" onclick="showPage('accounts',this)"><span class="ico">👤</span>账号管理</a>
-      <a data-page="permissions" onclick="showPage('permissions',this)"><span class="ico">🔐</span>权限管理</a>
+      <a data-page="permissions" id="navPermissions" style="display:none" onclick="showPage('permissions',this)"><span class="ico">🔐</span>权限管理</a>
       <a data-page="assistant" onclick="showPage('assistant',this)"><span class="ico">🤖</span>智能问答</a>
     </nav>
     <div class="side-foot">BearPi-HM Nano · 华为云 IoTDA</div>
@@ -238,8 +238,9 @@
           <div class="btn-row" style="margin-bottom:16px">
             <span style="font-size:13px;color:var(--muted)">选择角色</span>
             <select id="permRoleSelect" onchange="loadRolePerms(this.value)"></select>
-            <button class="btn" onclick="saveRolePerms()">保存权限</button>
+            <button class="btn" id="savePermBtn" onclick="saveRolePerms()">保存权限</button>
           </div>
+          <div id="permNotice" style="font-size:13px;color:var(--warn);margin-bottom:12px;min-height:18px"></div>
           <div id="permList"></div>
         </div>
       </section>
@@ -310,6 +311,9 @@ function renderUser(){
   document.getElementById('userName').textContent = u.username || u.real_name || '--';
   document.getElementById('userRole').textContent = u.role_name || u.role_code || '--';
   document.getElementById('userAvatar').textContent = (u.real_name || u.username || '管').charAt(0);
+  // 仅系统管理员可见"权限管理"入口（role:manage 权限专属）
+  document.getElementById('navPermissions').style.display =
+    (u.role_code === 'super_admin') ? 'flex' : 'none';
 }
 
 function showPage(name, el){
@@ -651,13 +655,15 @@ async function deleteUser(id){
 
 // ---------- 角色权限管理 ----------
 var allPerms = [];
+var permRoles = [];
 
 async function loadPermPage(){
   try {
-    var roles = await api('/api/roles');
+    permRoles = await api('/api/roles');
     var sel = document.getElementById('permRoleSelect');
-    sel.innerHTML = roles.map(function(r){
-      return '<option value="'+r.id+'">'+r.role_name+'</option>';
+    sel.innerHTML = permRoles.map(function(r){
+      var label = (r.role_code === 'super_admin') ? r.role_name + '（权限固定）' : r.role_name;
+      return '<option value="'+r.id+'">'+label+'</option>';
     }).join('');
     allPerms = await api('/api/permissions');
     loadRolePerms(sel.value);
@@ -667,6 +673,8 @@ async function loadPermPage(){
 async function loadRolePerms(roleId){
   if (!roleId) return;
   try {
+    var role = permRoles.find(function(r){ return r.id === parseInt(roleId); });
+    var isSuper = role && role.role_code === 'super_admin';
     var ids = await api('/api/roles/' + roleId + '/permissions');
     var modules = {};
     allPerms.forEach(function(p){
@@ -676,12 +684,16 @@ async function loadRolePerms(roleId){
     Object.keys(modules).forEach(function(m){
       html += '<div style="margin-bottom:12px"><div style="font-weight:600;font-size:13px;color:var(--muted);margin-bottom:8px">'+m+'</div><div class="btn-row" style="gap:8px">';
       modules[m].forEach(function(p){
-        html += '<label style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:8px;padding:7px 12px;cursor:pointer;font-size:13px;background:#fff;transition:border-color .15s">'+
-          '<input type="checkbox" data-pid="'+p.id+'" '+(ids.indexOf(p.id) >= 0 ? 'checked':'')+'> '+p.perm_name+'</label>';
+        html += '<label style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:8px;padding:7px 12px;cursor:'+(isSuper?'not-allowed':'pointer')+';font-size:13px;background:#fff;opacity:'+(isSuper?'.6':'1')+'">'+
+          '<input type="checkbox" data-pid="'+p.id+'" '+(ids.indexOf(p.id) >= 0 ? 'checked':'')+(isSuper?' disabled':'')+'> '+p.perm_name+'</label>';
       });
       html += '</div></div>';
     });
     document.getElementById('permList').innerHTML = html || '<span style="color:#9AA3AF">无权限项</span>';
+    document.getElementById('permNotice').textContent = isSuper
+      ? '⚠ 系统管理员权限固定，不可修改（防止权限管理被锁死）'
+      : '';
+    document.getElementById('savePermBtn').disabled = isSuper;
   } catch(e){ console.warn('loadRolePerms:', e); }
 }
 

@@ -561,7 +561,7 @@ async fn update_role_permissions(
     Path(id): Path<i64>,
     Json(body): Json<RolePermissionsIn>,
 ) -> Result<StatusCode, Error> {
-    auth.require(&s.db, "user:manage").await?;
+    auth.require(&s.db, "role:manage").await?;
     let exists: bool =
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM role WHERE id = $1)")
             .bind(id)
@@ -569,6 +569,27 @@ async fn update_role_permissions(
             .await?;
     if !exists {
         return Err(Error::NotFound(format!("角色 {id} 不存在")));
+    }
+    // 保护 1：系统管理员角色的权限不可修改（防止权限管理被锁死）
+    let role_code: Option<String> =
+        sqlx::query_scalar("SELECT role_code FROM role WHERE id = $1")
+            .bind(id)
+            .fetch_one(&s.db)
+            .await?;
+    if role_code.as_deref() == Some("super_admin") {
+        return Err(Error::Forbidden("系统管理员角色的权限固定，不可修改".into()));
+    }
+    // 保护 2：不能移除"本角色"的角色权限管理权限（防止把自己锁死）
+    if auth.role_id == id {
+        let manage_id: i64 =
+            sqlx::query_scalar("SELECT id FROM permission WHERE perm_code = 'role:manage'")
+                .fetch_one(&s.db)
+                .await?;
+        if !body.permission_ids.contains(&manage_id) {
+            return Err(Error::Forbidden(
+                "不能移除本角色的「角色权限管理」权限（防止权限管理锁死）".into(),
+            ));
+        }
     }
     let valid = sqlx::query_scalar::<_, i64>(
         "SELECT COUNT(*) FROM permission WHERE id = ANY($1)",
@@ -606,7 +627,7 @@ async fn get_role_permissions(
     auth: Auth,
     Path(id): Path<i64>,
 ) -> Result<Json<Vec<i64>>, Error> {
-    auth.require(&s.db, "user:manage").await?;
+    auth.require(&s.db, "role:manage").await?;
     let ids = sqlx::query_scalar::<_, i64>(
         "SELECT permission_id FROM role_permission WHERE role_id = $1",
     )
@@ -617,31 +638,70 @@ async fn get_role_permissions(
 }
 
 // ---------------- 首次启动的引导管理员 ----------------
-/// 首次启动且 `app_user` 为空时创建管理员,账号密码可用环境变量覆盖(默认 `admin`/`admin123`)
+/// 确保"系统管理员"(super_admin)与"路灯管理员"(admin)各有引导账号，账号密码可用环境变量覆盖。
+/// 默认: superadmin / superadmin123（系统管理员，权限固定）与 admin / admin123（路灯管理员）
 pub async fn bootstrap_admin(db: &PgPool) -> anyhow::Result<()> {
-    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM app_user")
-        .fetch_one(db)
-        .await?;
-    if count > 0 {
+    ensure_account(
+        db,
+        "super_admin",
+        "superadmin",
+        "BOOTSTRAP_SUPER_ADMIN_USERNAME",
+        "BOOTSTRAP_SUPER_ADMIN_PASSWORD",
+        "superadmin123",
+        "系统管理员",
+    )
+    .await?;
+    ensure_account(
+        db,
+        "admin",
+        "admin",
+        "BOOTSTRAP_ADMIN_USERNAME",
+        "BOOTSTRAP_ADMIN_PASSWORD",
+        "admin123",
+        "路灯管理员",
+    )
+    .await?;
+    Ok(())
+}
+
+/// 若指定角色还没有账号，则按角色创建一个引导账号
+async fn ensure_account(
+    db: &PgPool,
+    role_code: &str,
+    default_user: &str,
+    user_env: &str,
+    pwd_env: &str,
+    default_pwd: &str,
+    real_name: &str,
+) -> anyhow::Result<()> {
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(\
+         SELECT 1 FROM app_user u JOIN role r ON r.id = u.role_id WHERE r.role_code = $1)",
+    )
+    .bind(role_code)
+    .fetch_one(db)
+    .await?;
+    if exists {
         return Ok(());
     }
-    let username = std::env::var("BOOTSTRAP_ADMIN_USERNAME")
-        .unwrap_or_else(|_| "admin".into());
-    let password = std::env::var("BOOTSTRAP_ADMIN_PASSWORD").unwrap_or_else(|_| {
+    let username = std::env::var(user_env).unwrap_or_else(|_| default_user.to_string());
+    let password = std::env::var(pwd_env).unwrap_or_else(|_| {
         tracing::warn!(
-            "BOOTSTRAP_ADMIN_PASSWORD 未设置,使用默认账号 admin/admin123(生产环境请覆盖)"
+            "{pwd_env} 未设置,使用默认账号 {username}/{default_pwd}(生产环境请覆盖)"
         );
-        "admin123".into()
+        default_pwd.to_string()
     });
     let hash = hash_password(&password).map_err(|e| anyhow::anyhow!("{e}"))?;
     sqlx::query(
         "INSERT INTO app_user (username, password_hash, real_name, role_id, status) \
-         VALUES ($1, $2, '系统管理员', (SELECT id FROM role WHERE role_code = 'admin'), 1)",
+         VALUES ($1, $2, $3, (SELECT id FROM role WHERE role_code = $4), 1)",
     )
     .bind(&username)
     .bind(hash)
+    .bind(real_name)
+    .bind(role_code)
     .execute(db)
     .await?;
-    tracing::info!("已创建引导管理员账号 {username}");
+    tracing::info!("已创建引导账号 {username}（{role_code}）");
     Ok(())
 }
