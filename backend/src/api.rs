@@ -38,7 +38,9 @@ pub enum Error {
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
         let status = match &self {
-            Self::Db(_) | Self::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::Db(_) | Self::Internal(_) => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
             Self::Iothub(_) => StatusCode::BAD_GATEWAY,
             Self::IothubUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
@@ -296,7 +298,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-fn parse_ts(param: &str, raw: &str) -> Result<DateTime<Utc>, Error> {
+pub fn parse_ts(param: &str, raw: &str) -> Result<DateTime<Utc>, Error> {
     DateTime::parse_from_rfc3339(raw)
         .map(|dt| dt.with_timezone(&Utc))
         .map_err(|_| {
@@ -306,7 +308,7 @@ fn parse_ts(param: &str, raw: &str) -> Result<DateTime<Utc>, Error> {
         })
 }
 
-fn clamp_limit(limit: Option<i64>, default: i64, max: i64) -> i64 {
+pub fn clamp_limit(limit: Option<i64>, default: i64, max: i64) -> i64 {
     limit.unwrap_or(default).clamp(1, max)
 }
 
@@ -316,7 +318,9 @@ fn clamp_limit(limit: Option<i64>, default: i64, max: i64) -> i64 {
     path = "/api/health",
     responses((status = 200, description = "服务与数据库状态"))
 )]
-async fn health(State(s): State<Arc<AppState>>) -> Result<Json<serde_json::Value>, Error> {
+async fn health(
+    State(s): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, Error> {
     sqlx::query_scalar::<_, i32>("SELECT 1")
         .fetch_one(&s.db)
         .await?;
@@ -645,9 +649,10 @@ async fn set_lamp(
     let hub = s.iothub.as_ref().ok_or(Error::IothubUnavailable)?;
     // 指令留痕:北向接受记 sent,失败记 failed(固件执行结果不回传,无法追踪)
     let result = hub.control_led(&id, body.action).await;
-    let (status, message) = result
-        .as_ref()
-        .map_or_else(|e| ("failed", e.to_string()), |()| ("sent", String::new()));
+    let (status, message) = result.as_ref().map_or_else(
+        |e| ("failed", e.to_string()),
+        |()| ("sent", String::new()),
+    );
     sqlx::query(
         "INSERT INTO command_record (device_id, action, source, status, message) \
          VALUES ($1, $2, 'manual', $3, $4)",
@@ -675,12 +680,13 @@ async fn get_threshold(
     Path(id): Path<String>,
 ) -> Result<Json<ThresholdResponse>, Error> {
     auth.require(&s.db, "config:threshold").await?;
-    let threshold =
-        sqlx::query_scalar::<_, i32>("SELECT threshold FROM config WHERE device_id = $1")
-            .bind(&id)
-            .fetch_optional(&s.db)
-            .await?
-            .unwrap_or(40);
+    let threshold = sqlx::query_scalar::<_, i32>(
+        "SELECT threshold FROM config WHERE device_id = $1",
+    )
+    .bind(&id)
+    .fetch_optional(&s.db)
+    .await?
+    .unwrap_or(40);
     Ok(Json(ThresholdResponse {
         device_id: id,
         threshold,
@@ -894,7 +900,10 @@ async fn patch_alarm(
     responses((status = 200, description = "首页聚合数据", body = Dashboard)),
     security(("bearer_auth" = []))
 )]
-async fn dashboard(State(s): State<Arc<AppState>>, auth: Auth) -> Result<Json<Dashboard>, Error> {
+async fn dashboard(
+    State(s): State<Arc<AppState>>,
+    auth: Auth,
+) -> Result<Json<Dashboard>, Error> {
     auth.require(&s.db, "device:status").await?;
     let devices = sqlx::query_as::<_, DeviceCounts>(
         "SELECT COUNT(*)::bigint AS total, \

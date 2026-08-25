@@ -11,13 +11,7 @@ const KB_INTRO: &str = "知识库覆盖：离线、光照异常、频繁开关�
 
 // 复杂查询行的类型别名（消 clippy::type_complexity），元素按 SQL 列顺序
 // 告警行：device_id / type / message / created_at / resolved_at
-type AlarmRow = (
-    String,
-    String,
-    String,
-    DateTime<Utc>,
-    Option<DateTime<Utc>>,
-);
+type AlarmRow = (String, String, String, DateTime<Utc>, Option<DateTime<Utc>>);
 // 设备行：id / name / location / status / lamp / last_seen_at
 type DeviceRow = (
     String,
@@ -61,7 +55,7 @@ const INTENTS: &[(&str, &[&str])] = &[
     ),
 ];
 
-fn classify_intent(question: &str) -> &'static str {
+pub fn classify_intent(question: &str) -> &'static str {
     let q = question.to_lowercase();
     let mut best = "fallback";
     let mut best_score = 0usize;
@@ -80,7 +74,13 @@ fn classify_intent(question: &str) -> &'static str {
 }
 
 /// 解析"最近N天/小时/分钟/周"，返回 (起始时间, 描述)
-fn parse_window(question: &str, default_days: i64) -> (DateTime<Utc>, String) {
+///
+/// # Panics
+/// 内置正则常量非法时 panic(编译期常量,实际不会触发)。
+pub fn parse_window(
+    question: &str,
+    default_days: i64,
+) -> (DateTime<Utc>, String) {
     let re = Regex::new(r"最近\s*(\d+)\s*(天|日|小时|分钟|周)")
         .expect("valid regex");
     re.captures(question).map_or_else(
@@ -172,7 +172,7 @@ async fn advice_for_question(
     Ok(None)
 }
 
-fn fmt_time(dt: DateTime<Utc>) -> String {
+pub fn fmt_time(dt: DateTime<Utc>) -> String {
     dt.format("%m-%d %H:%M").to_string()
 }
 
