@@ -54,7 +54,8 @@ backend/
 ├── migrations/
 │   ├── 0001_init.sql         # 业务表：device/lux_record/config/alarm/command_record
 │   ├── 0002_rbac.sql         # RBAC：role/permission/role_permission/app_user + 种子数据
-│   └── 0003_assistant.sql    # 维护知识库 maintenance_knowledge + 种子数据
+│   ├── 0003_assistant.sql    # 维护知识库 maintenance_knowledge + 种子数据
+│   └── 0004_super_admin.sql  # super_admin 角色 + role:manage 权限码（防权限锁死）
 └── src/
     ├── main.rs               # 入口：装配 state、迁移、CORS、启动
     ├── api.rs                # 业务 REST API：设备/光照/控灯/阈值/告警/指令/仪表盘/问答
@@ -97,7 +98,12 @@ cargo run
 RUST_LOG=streetlight_backend=debug cargo run
 ```
 
-首次启动且 `app_user` 表为空时，自动创建管理员（默认 `admin` / `admin123`，可用 `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD` 覆盖）。生产环境必须在 `.env` 中覆盖这两个值与 `JWT_SECRET`。
+启动时**按角色补建引导账号**（某角色已有任意账号则跳过该角色）：
+
+- `super_admin` 系统管理员：默认 `superadmin` / `superadmin123`（可用 `BOOTSTRAP_SUPER_ADMIN_USERNAME` / `BOOTSTRAP_SUPER_ADMIN_PASSWORD` 覆盖）
+- `admin` 路灯管理员：默认 `admin` / `admin123`（可用 `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD` 覆盖）
+
+生产环境必须在 `.env` 中覆盖全部引导账号默认值与 `JWT_SECRET`。
 
 ### 3.3 Docker Compose 一键部署
 
@@ -153,7 +159,7 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 - 密码使用 **Argon2id** 哈希（随机盐），数据库中只存哈希串。
 - 登录成功后签发 **HS256 JWT**，有效期 24 小时，`Claims` 含 `user_id / username / role_id / role_code / exp`。
 - 全局中间件 `auth_middleware` 只做“你是谁”（认证）：除公开路径外，要求请求头 `Authorization: Bearer <token>`；校验通过后把 `Auth { user_id, role_id, role_code }` 塞进 request extensions。
-- handler 通过 `Auth` extractor 取出身份，再调用 `auth.require(&db, "权限码")` 做“你能不能做”（授权）。权限映射每次实时查库，因此在 Swagger 里改了角色权限后**立即生效，无需重启**。
+- handler 通过 `Auth` extractor 取出身份，再调用 `auth.require(&db, "权限码")` 做“你能不能做”（授权）。权限映射每次实时查库，因此用 `super_admin` 在 Swagger 里改了角色权限后**立即生效，无需重启**。
 
 公开路径（无需 token）：
 
@@ -167,12 +173,13 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 
 ### 4.2 角色与权限码
 
-种子数据在 `migrations/0002_rbac.sql`：
+种子数据在 `migrations/0002_rbac.sql` 与 `migrations/0004_super_admin.sql`：
 
 | role_id | role_code | 角色 | 权限范围 |
 |---|---|---|---|
 | 1 | `municipal` | 市政人员 | 监测、可视化、控制（含联动预留）、阈值、告警查看、指令留痕 |
-| 2 | `admin` | 路灯管理员 | 全部权限 |
+| 2 | `admin` | 路灯管理员 | 1~12 号业务权限；**不含 `role:manage`**，不能调整角色权限 |
+| 3 | `super_admin` | 系统管理员 | 全部 13 个权限（含 `role:manage`）；其权限固定不可被修改 |
 
 权限码与 API 的对应关系：
 
@@ -187,15 +194,17 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 | `alarm:offline` | 离线告警 | 预留；离线告警由轮询任务自动生成 |
 | `device:manage` | 设备管理 | 设备增删改 |
 | `alarm:log` | 告警日志 | 告警查询、处理 |
-| `assistant:qa` | 维护智能问答 | `POST /api/assistant/ask`（默认仅 admin） |
+| `assistant:qa` | 维护智能问答 | `POST /api/assistant/ask`（默认 admin / super_admin） |
 | `command:log` | 指令留痕 | 全局/单设备指令查询 |
-| `user:manage` | 账号与权限管理 | 用户/角色/权限 API |
+| `user:manage` | 账号与角色/权限查询 | 用户增删查、角色/权限列表查询 |
+| `role:manage` | 角色权限管理 | `GET/PUT /api/roles/{id}/permissions`（默认仅 super_admin） |
 
 ### 4.3 安全注意事项
 
 - `JWT_SECRET` 必须覆盖开发默认值 `dev-secret-change-me`，建议 32 字节以上随机串；泄露后所有已签发 token 可被伪造。
 - 当前 token **无服务端吊销机制**：删除或禁用账号后，已签发的 token 在 24 小时有效期内仍能通过中间件访问其他接口；其中账号被删除后 `/api/auth/me` 会因查不到账号返回 401，禁用账号不会触发该检查。需要严格吊销时，应增加黑名单/版本号机制或缩短 TTL。
-- `BOOTSTRAP_ADMIN_*` 仅在 `app_user` 表为空时生效；生产首次启动后请删除或修改默认管理员。
+- 引导账号按角色分别判断：`BOOTSTRAP_SUPER_ADMIN_*` / `BOOTSTRAP_ADMIN_*` 只在对应角色**没有任何账号**时生效；生产首次启动后请删除或修改默认账号。
+- 防权限锁死：`super_admin` 的权限映射被接口硬保护（403 拒绝修改）；拥有 `role:manage` 的角色修改**自己**的权限时，必须保留 `role:manage`，否则同样 403。
 - CORS 当前为开发期全放开（`CorsLayer` Any + 业务路由 permissive），上线前应收紧为前端实际域名。
 
 ---
@@ -234,8 +243,8 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 | DELETE | `/api/users/{id}` | `user:manage` | 删除账号（不能删自己） | 200 |
 | GET | `/api/roles` | `user:manage` | 角色列表 | 200 |
 | GET | `/api/permissions` | `user:manage` | 权限列表 | 200 |
-| GET | `/api/roles/{id}/permissions` | `user:manage` | 角色当前权限 ID 列表（*未注册到 Swagger*） | 200 |
-| PUT | `/api/roles/{id}/permissions` | `user:manage` | 全量替换角色权限映射 | 204 |
+| GET | `/api/roles/{id}/permissions` | `role:manage` | 角色当前权限 ID 列表（*未注册到 Swagger*） | 200 |
+| PUT | `/api/roles/{id}/permissions` | `role:manage` | 全量替换角色权限映射（super_admin 角色受保护） | 204 |
 | GET | `/api/devices` | `device:status` | 设备列表 | 200 |
 | POST | `/api/devices` | `device:manage` | 注册设备（幂等） | 201 |
 | PATCH | `/api/devices/{id}` | `device:manage` | 更新设备名称/位置 | 200 |
@@ -268,7 +277,7 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
   "token_type": "Bearer",
   "expires_in": 86400,
   "user": {
-    "id": 1, "username": "admin", "real_name": "系统管理员",
+    "id": 1, "username": "admin", "real_name": "路灯管理员",
     "role_id": 2, "role_code": "admin", "role_name": "路灯管理员",
     "status": 1, "created_at": "...", "updated_at": "..."
   },
@@ -288,14 +297,18 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 
 校验规则：`username` 去空格后 1~64 字符；密码 6~64 字符；`role_id` 必须存在；用户名唯一。
 
-**PUT /api/roles/{id}/permissions**
+**GET / PUT /api/roles/{id}/permissions**
+
+两个接口都需要 `role:manage`（默认仅 `super_admin`）。PUT 为全量替换：
 
 ```jsonc
 // 请求：权限 ID 数组（注意是数字 ID，不是权限码字符串），全量替换
 { "permission_ids": [1, 2, 3, 4, 5, 6, 7, 9, 11] }
 ```
 
-所有 `permission_ids` 必须真实存在，否则 400；更新在单个事务中完成。
+- 所有 `permission_ids` 必须真实存在，否则 400；更新在单个事务中完成。
+- `super_admin` 角色的权限映射**固定**，对其 PUT 返回 403。
+- 修改“自己当前角色”时，提交的权限 ID 里必须保留 `role:manage`，否则 403（防止把自己锁在权限管理之外）。
 
 ### 5.4 设备管理
 
@@ -454,8 +467,8 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 | `config` | 每设备阈值 | `device_id`(PK), `threshold` 默认 40 |
 | `alarm` | 告警 | `type`, `message`, `resolved_at`（非空=已处理） |
 | `command_record` | 控制指令留痕 | `action/source/status/message`，`device_id + created_at` 索引 |
-| `role` | 角色 | `municipal` / `admin` |
-| `permission` | 权限点 | 12 个 `perm_code` |
+| `role` | 角色 | `municipal` / `admin` / `super_admin` |
+| `permission` | 权限点 | 13 个 `perm_code` |
 | `role_permission` | 角色-权限映射 | `(role_id, permission_id)` 唯一，级联删除 |
 | `app_user` | 登录账号 | `password_hash`（Argon2id），`status` 0/1 |
 | `maintenance_knowledge` | 问答知识库 | `keyword/cause/suggestion` 种子数据 |
@@ -469,6 +482,7 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 - 文件名必须递增：`NNNN_描述.sql`。
 - 已应用到数据库的迁移文件**不允许修改**；只能新增迁移。0001 文件内注释允许“设备未正式部署前原地修改”，一旦上线立即冻结。
 - 种子数据（角色/权限/知识库）写在迁移 SQL 里，保证全新环境开箱即用。
+- 已有库升级到 0004 时，`admin` 不会自动获得新增的 `role:manage`（0002 的授权先于该权限插入执行，设计如此）；需要授权时用 `superadmin` 登录后走 PUT 接口。
 
 ---
 
@@ -480,7 +494,7 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 初始化 tracing（默认 info，可用 RUST_LOG 覆盖）
 → 连接 PostgreSQL（默认本地 streetlight/streetlight，连接池上限 5）
 → 自动执行 migrations
-→ bootstrap_admin：app_user 为空时创建管理员
+→ bootstrap_admin：按角色补建引导账号（super_admin / admin 各缺账号才创建）
 → 读取 JWT_SECRET（未设置则警告并用开发默认值）
 → IothubClient::from_env()：HUAWEI_* 齐全才启用，否则北向功能停用
 → 若启用：spawn 8 秒轮询任务
@@ -640,8 +654,10 @@ cargo build
 | `HUAWEI_PROJECT_ID` | 空 | 华为云项目 ID |
 | `HUAWEI_IOTDA_ENDPOINT` | 空 | IoTDA 实例**应用侧**域名，如 `xxx.st1.iotda-app.cn-south-1.myhuaweicloud.com` |
 | `HUAWEI_IOTDA_REGION` | 从 endpoint 推断 | 标准版/企业版 V11 衍生签名所需区域 |
-| `BOOTSTRAP_ADMIN_USERNAME` | `admin` | 仅首次启动（账号表为空）生效 |
-| `BOOTSTRAP_ADMIN_PASSWORD` | `admin123` | 仅首次启动生效，生产必改 |
+| `BOOTSTRAP_SUPER_ADMIN_USERNAME` | `superadmin` | 仅当 `super_admin` 角色无账号时生效 |
+| `BOOTSTRAP_SUPER_ADMIN_PASSWORD` | `superadmin123` | 仅当 `super_admin` 角色无账号时生效，生产必改 |
+| `BOOTSTRAP_ADMIN_USERNAME` | `admin` | 仅当 `admin` 角色无账号时生效 |
+| `BOOTSTRAP_ADMIN_PASSWORD` | `admin123` | 仅当 `admin` 角色无账号时生效，生产必改 |
 | `RUST_LOG` | `info` | tracing env-filter |
 
 - 后端**不会自动读取 `.env` 文件**（没有 dotenv 加载代码）：本地 `cargo run` 先 `set -a && . ./.env && set +a`；Docker Compose 由 `env_file` 注入。
