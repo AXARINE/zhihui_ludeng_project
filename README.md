@@ -53,11 +53,7 @@ cd zhihui_ludeng_project
 ### 2. 启动数据库
 
 ```bash
-docker run -d --name streetlight-postgres \
-  -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_DB=streetlight \
-  -p 5432:5432 \
-  postgres:16
+docker run -d --name streetlight-postgres -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=streetlight -p 5432:5432 postgres:16
 ```
 
 ### 3. 启动后端
