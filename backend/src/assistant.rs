@@ -9,18 +9,54 @@ use sqlx::PgPool;
 
 const KB_INTRO: &str = "知识库覆盖：离线、光照异常、频繁开关、通信超时、灯不亮、温度过高。可问我：告警情况、光照趋势、阈值设置、设备状态、控制指令或维护建议。";
 
+// 复杂查询行的类型别名（消 clippy::type_complexity），元素按 SQL 列顺序
+// 告警行：device_id / type / message / created_at / resolved_at
+type AlarmRow = (
+    String,
+    String,
+    String,
+    DateTime<Utc>,
+    Option<DateTime<Utc>>,
+);
+// 设备行：id / name / location / status / lamp / last_seen_at
+type DeviceRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<DateTime<Utc>>,
+);
+
 // 意图词典：命中关键词累加长度作得分（长词权重高），取最高分为意图
 const INTENTS: &[(&str, &[&str])] = &[
     ("query_alarm", &["告警", "报警", "离线", "故障", "异常"]),
     ("query_threshold", &["阈值", "参数", "配置", "下限", "上限"]),
-    ("query_luminance", &["光照", "亮度", "照度", "光照强度", "lux"]),
+    (
+        "query_luminance",
+        &["光照", "亮度", "照度", "光照强度", "lux"],
+    ),
     ("query_device", &["设备", "在线", "状态", "路灯", "灯"]),
-    ("query_command", &["指令", "开关", "控制记录", "操作记录", "记录"]),
+    (
+        "query_command",
+        &["指令", "开关", "控制记录", "操作记录", "记录"],
+    ),
     (
         "advice",
         &[
-            "怎么", "如何", "为什么", "原因", "建议", "维修", "维护", "处理", "解决",
-            "排查", "频繁", "温度", "抖",
+            "怎么",
+            "如何",
+            "为什么",
+            "原因",
+            "建议",
+            "维修",
+            "维护",
+            "处理",
+            "解决",
+            "排查",
+            "频繁",
+            "温度",
+            "抖",
         ],
     ),
 ];
@@ -45,24 +81,34 @@ fn classify_intent(question: &str) -> &'static str {
 
 /// 解析"最近N天/小时/分钟/周"，返回 (起始时间, 描述)
 fn parse_window(question: &str, default_days: i64) -> (DateTime<Utc>, String) {
-    let re = Regex::new(r"最近\s*(\d+)\s*(天|日|小时|分钟|周)").expect("valid regex");
-    if let Some(caps) = re.captures(question) {
-        let n: i64 = caps[1].parse().unwrap_or(default_days);
-        let unit = &caps[2];
-        let (dur, label) = match unit {
-            "小时" => (Duration::hours(n), "小时"),
-            "分钟" => (Duration::minutes(n), "分钟"),
-            "周" => (Duration::weeks(n), "周"),
-            _ => (Duration::days(n), "天"),
-        };
-        (Utc::now() - dur, format!("最近{n}{label}"))
-    } else {
-        (Utc::now() - Duration::days(default_days), format!("最近{default_days}天"))
-    }
+    let re = Regex::new(r"最近\s*(\d+)\s*(天|日|小时|分钟|周)")
+        .expect("valid regex");
+    re.captures(question).map_or_else(
+        || {
+            (
+                Utc::now() - Duration::days(default_days),
+                format!("最近{default_days}天"),
+            )
+        },
+        |caps| {
+            let n: i64 = caps[1].parse().unwrap_or(default_days);
+            let unit = &caps[2];
+            let (dur, label) = match unit {
+                "小时" => (Duration::hours(n), "小时"),
+                "分钟" => (Duration::minutes(n), "分钟"),
+                "周" => (Duration::weeks(n), "周"),
+                _ => (Duration::days(n), "天"),
+            };
+            (Utc::now() - dur, format!("最近{n}{label}"))
+        },
+    )
 }
 
-/// 从提问抽取设备：优先匹配 device_id/name 子串，其次"灯N号"/"N号灯"。None = 全部设备
-async fn resolve_device(pool: &PgPool, question: &str) -> Result<Option<String>, sqlx::Error> {
+/// 从提问抽取设备：优先匹配 `device_id/name` 子串，其次"灯N号"/"N号灯"。None = 全部设备
+async fn resolve_device(
+    pool: &PgPool,
+    question: &str,
+) -> Result<Option<String>, sqlx::Error> {
     let rows: Vec<(String, String)> =
         sqlx::query_as("SELECT id, name FROM device ORDER BY created_at")
             .fetch_all(pool)
@@ -72,18 +118,16 @@ async fn resolve_device(pool: &PgPool, question: &str) -> Result<Option<String>,
             return Ok(Some(id.clone()));
         }
     }
-    let re = Regex::new(r"灯\s*(\d+)\s*号|(\d+)\s*号\s*灯|灯\s*(\d+)").expect("valid regex");
-    if let Some(caps) = re.captures(question) {
-        if let Some(num) = caps
-            .get(1)
-            .or_else(|| caps.get(2))
-            .or_else(|| caps.get(3))
-        {
-            let num = num.as_str();
-            for (id, name) in &rows {
-                if id.contains(num) || name.contains(num) {
-                    return Ok(Some(id.clone()));
-                }
+    let re = Regex::new(r"灯\s*(\d+)\s*号|(\d+)\s*号\s*灯|灯\s*(\d+)")
+        .expect("valid regex");
+    if let Some(caps) = re.captures(question)
+        && let Some(num) =
+            caps.get(1).or_else(|| caps.get(2)).or_else(|| caps.get(3))
+    {
+        let num = num.as_str();
+        for (id, name) in &rows {
+            if id.contains(num) || name.contains(num) {
+                return Ok(Some(id.clone()));
             }
         }
     }
@@ -91,7 +135,10 @@ async fn resolve_device(pool: &PgPool, question: &str) -> Result<Option<String>,
 }
 
 /// 从告警文本匹配知识库建议
-async fn advice_for_alarms(pool: &PgPool, texts: &[String]) -> Result<String, sqlx::Error> {
+async fn advice_for_alarms(
+    pool: &PgPool,
+    texts: &[String],
+) -> Result<String, sqlx::Error> {
     let rows: Vec<(String, String, String)> = sqlx::query_as(
         "SELECT keyword, cause, suggestion FROM maintenance_knowledge",
     )
@@ -106,7 +153,10 @@ async fn advice_for_alarms(pool: &PgPool, texts: &[String]) -> Result<String, sq
 }
 
 /// 从提问匹配知识库建议
-async fn advice_for_question(pool: &PgPool, question: &str) -> Result<Option<String>, sqlx::Error> {
+async fn advice_for_question(
+    pool: &PgPool,
+    question: &str,
+) -> Result<Option<String>, sqlx::Error> {
     let rows: Vec<(String, String, String)> = sqlx::query_as(
         "SELECT keyword, cause, suggestion FROM maintenance_knowledge",
     )
@@ -114,7 +164,9 @@ async fn advice_for_question(pool: &PgPool, question: &str) -> Result<Option<Str
     .await?;
     for (kw, cause, suggestion) in &rows {
         if question.contains(kw) {
-            return Ok(Some(format!("【{kw}】原因：{cause}；建议：{suggestion}")));
+            return Ok(Some(format!(
+                "【{kw}】原因：{cause}；建议：{suggestion}"
+            )));
         }
     }
     Ok(None)
@@ -125,13 +177,15 @@ fn fmt_time(dt: DateTime<Utc>) -> String {
 }
 
 /// 主流程：按意图查询数据库并生成回答
-pub async fn answer(pool: &PgPool, question: &str) -> Result<String, sqlx::Error> {
+pub async fn answer(
+    pool: &PgPool,
+    question: &str,
+) -> Result<String, sqlx::Error> {
     let intent = classify_intent(question);
     let device_id = resolve_device(pool, question).await?;
-    let scope = match &device_id {
-        Some(d) => format!("设备 {d}"),
-        None => "全部设备".to_string(),
-    };
+    let scope = device_id
+        .as_ref()
+        .map_or_else(|| "全部设备".to_string(), |d| format!("设备 {d}"));
     let has_dev = device_id.is_some();
 
     match intent {
@@ -144,21 +198,36 @@ pub async fn answer(pool: &PgPool, question: &str) -> Result<String, sqlx::Error
                 "SELECT device_id, type, message, created_at, resolved_at FROM alarm \
                  WHERE created_at >= $1 ORDER BY created_at DESC LIMIT 20"
             };
-            let rows: Vec<(String, String, String, DateTime<Utc>, Option<DateTime<Utc>>)> =
-                if let Some(d) = &device_id {
-                    sqlx::query_as(sql).bind(start).bind(d).fetch_all(pool).await?
-                } else {
-                    sqlx::query_as(sql).bind(start).fetch_all(pool).await?
-                };
+            let rows: Vec<AlarmRow> = if let Some(d) = &device_id {
+                sqlx::query_as(sql)
+                    .bind(start)
+                    .bind(d)
+                    .fetch_all(pool)
+                    .await?
+            } else {
+                sqlx::query_as(sql).bind(start).fetch_all(pool).await?
+            };
             if rows.is_empty() {
                 return Ok(format!("{desc}，{scope}没有告警记录。"));
             }
             let unhandled = rows.iter().filter(|r| r.4.is_none()).count();
-            let mut lines =
-                vec![format!("{desc}，{scope}共 {} 条告警，未处理 {unhandled} 条：", rows.len())];
+            let mut lines = vec![format!(
+                "{desc}，{scope}共 {} 条告警，未处理 {unhandled} 条：",
+                rows.len()
+            )];
             for r in rows.iter().take(5) {
-                let tag = if r.4.is_none() { "未处理" } else { "已处理" };
-                lines.push(format!("· {} {}（{tag}）{} {}", r.0, r.1, fmt_time(r.3), r.2));
+                let tag = if r.4.is_none() {
+                    "未处理"
+                } else {
+                    "已处理"
+                };
+                lines.push(format!(
+                    "· {} {}（{tag}）{} {}",
+                    r.0,
+                    r.1,
+                    fmt_time(r.3),
+                    r.2
+                ));
             }
             let texts: Vec<String> = rows
                 .iter()
@@ -180,11 +249,16 @@ pub async fn answer(pool: &PgPool, question: &str) -> Result<String, sqlx::Error
                 "SELECT COUNT(*), MIN(lux), MAX(lux), AVG(lux)::float8 FROM lux_record \
                  WHERE created_at >= $1"
             };
-            let row: (i64, Option<i32>, Option<i32>, Option<f64>) = if let Some(d) = &device_id {
-                sqlx::query_as(sql).bind(start).bind(d).fetch_one(pool).await?
-            } else {
-                sqlx::query_as(sql).bind(start).fetch_one(pool).await?
-            };
+            let row: (i64, Option<i32>, Option<i32>, Option<f64>) =
+                if let Some(d) = &device_id {
+                    sqlx::query_as(sql)
+                        .bind(start)
+                        .bind(d)
+                        .fetch_one(pool)
+                        .await?
+                } else {
+                    sqlx::query_as(sql).bind(start).fetch_one(pool).await?
+                };
             if row.0 == 0 {
                 return Ok(format!("{desc}，{scope}没有光照数据。"));
             }
@@ -208,7 +282,9 @@ pub async fn answer(pool: &PgPool, question: &str) -> Result<String, sqlx::Error
                 sqlx::query_as(sql).fetch_all(pool).await?
             };
             if rows.is_empty() {
-                return Ok(format!("{scope}暂未设置光照联动阈值（默认 40 lux）。"));
+                return Ok(format!(
+                    "{scope}暂未设置光照联动阈值（默认 40 lux）。"
+                ));
             }
             let mut lines = vec![format!("{scope}光照联动阈值：")];
             for (d, t) in &rows {
@@ -224,12 +300,11 @@ pub async fn answer(pool: &PgPool, question: &str) -> Result<String, sqlx::Error
                 "SELECT id, name, location, status, lamp, last_seen_at FROM device \
                  ORDER BY created_at"
             };
-            let rows: Vec<(String, String, String, String, String, Option<DateTime<Utc>>)> =
-                if let Some(d) = &device_id {
-                    sqlx::query_as(sql).bind(d).fetch_all(pool).await?
-                } else {
-                    sqlx::query_as(sql).fetch_all(pool).await?
-                };
+            let rows: Vec<DeviceRow> = if let Some(d) = &device_id {
+                sqlx::query_as(sql).bind(d).fetch_all(pool).await?
+            } else {
+                sqlx::query_as(sql).fetch_all(pool).await?
+            };
             if rows.is_empty() {
                 return Ok("当前没有路灯设备。".to_string());
             }
@@ -240,9 +315,13 @@ pub async fn answer(pool: &PgPool, question: &str) -> Result<String, sqlx::Error
                     name,
                     id,
                     if location.is_empty() { "-" } else { location },
-                    if status == "online" { "在线" } else { "离线" },
+                    if status == "online" {
+                        "在线"
+                    } else {
+                        "离线"
+                    },
                     if lamp == "on" { "亮" } else { "灭" },
-                    last.map(fmt_time).unwrap_or_else(|| "-".to_string()),
+                    last.map_or_else(|| "-".to_string(), fmt_time),
                 ));
             }
             Ok(lines.join("\n"))
@@ -258,7 +337,11 @@ pub async fn answer(pool: &PgPool, question: &str) -> Result<String, sqlx::Error
             };
             let rows: Vec<(String, String, String, String, DateTime<Utc>)> =
                 if let Some(d) = &device_id {
-                    sqlx::query_as(sql).bind(start).bind(d).fetch_all(pool).await?
+                    sqlx::query_as(sql)
+                        .bind(start)
+                        .bind(d)
+                        .fetch_all(pool)
+                        .await?
                 } else {
                     sqlx::query_as(sql).bind(start).fetch_all(pool).await?
                 };
@@ -269,9 +352,23 @@ pub async fn answer(pool: &PgPool, question: &str) -> Result<String, sqlx::Error
             for (d, action, source, status, at) in &rows {
                 lines.push(format!(
                     "· {d} {}（{}，{}）{}",
-                    if action == "on" { "开灯" } else if action == "off" { "关灯" } else { action },
-                    if source == "auto" { "自动联动" } else { "手动" },
-                    if status == "sent" { "已受理" } else { "失败" },
+                    if action == "on" {
+                        "开灯"
+                    } else if action == "off" {
+                        "关灯"
+                    } else {
+                        action
+                    },
+                    if source == "auto" {
+                        "自动联动"
+                    } else {
+                        "手动"
+                    },
+                    if status == "sent" {
+                        "已受理"
+                    } else {
+                        "失败"
+                    },
                     fmt_time(*at),
                 ));
             }
@@ -279,10 +376,7 @@ pub async fn answer(pool: &PgPool, question: &str) -> Result<String, sqlx::Error
         }
         _ => {
             let adv = advice_for_question(pool, question).await?;
-            match adv {
-                Some(a) => Ok(a),
-                None => Ok(format!("没太理解您的问题。{KB_INTRO}")),
-            }
+            adv.map_or_else(|| Ok(format!("没太理解您的问题。{KB_INTRO}")), Ok)
         }
     }
 }
