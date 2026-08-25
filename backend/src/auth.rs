@@ -254,7 +254,10 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/users/{id}", delete(delete_user))
         .route("/api/roles", get(list_roles))
         .route("/api/permissions", get(list_permissions))
-        .route("/api/roles/{id}/permissions", put(update_role_permissions))
+        .route(
+            "/api/roles/{id}/permissions",
+            get(get_role_permissions).put(update_role_permissions),
+        )
         .with_state(state)
 }
 
@@ -578,6 +581,22 @@ async fn update_role_permissions(
     }
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// GET /api/roles/{id}/permissions —— 查询角色当前拥有的权限 ID 列表
+async fn get_role_permissions(
+    State(s): State<Arc<AppState>>,
+    auth: Auth,
+    Path(id): Path<i64>,
+) -> Result<Json<Vec<i64>>, Error> {
+    auth.require(&s.db, "user:manage").await?;
+    let ids = sqlx::query_scalar::<_, i64>(
+        "SELECT permission_id FROM role_permission WHERE role_id = $1",
+    )
+    .bind(id)
+    .fetch_all(&s.db)
+    .await?;
+    Ok(Json(ids))
 }
 
 // ---------------- 首次启动的引导管理员 ----------------

@@ -120,6 +120,7 @@
       <a data-page="devices" onclick="showPage('devices',this)"><span class="ico">💡</span>设备管理</a>
       <a data-page="alarms" onclick="showPage('alarms',this)"><span class="ico">🚨</span>告警管理</a>
       <a data-page="accounts" onclick="showPage('accounts',this)"><span class="ico">👤</span>账号管理</a>
+      <a data-page="permissions" onclick="showPage('permissions',this)"><span class="ico">🔐</span>权限管理</a>
       <a data-page="assistant" onclick="showPage('assistant',this)"><span class="ico">🤖</span>智能问答</a>
     </nav>
     <div class="side-foot">BearPi-HM Nano · 华为云 IoTDA</div>
@@ -168,7 +169,7 @@
           </div>
         </div>
         <div class="panel">
-          <h3 class="spread">历史光照数据<button class="btn small" id="histToggle" onclick="toggleHist()">展开</button></h3>
+          <h3 class="spread">历史光照数据（按小时 · 最近24小时）<button class="btn small" id="histToggle" onclick="toggleHist()">展开</button></h3>
           <div id="histWrap" class="collapse">
             <table><thead><tr><th>#</th><th>光照 (lux)</th><th>时间</th></tr></thead><tbody id="histTbody"></tbody></table>
           </div>
@@ -229,6 +230,20 @@
         </div>
       </section>
 
+      <!-- 权限管理 -->
+      <section class="page" id="page-permissions">
+        <div class="panel">
+          <h3>角色权限管理</h3>
+          <div style="font-size:12px;color:#9AA3AF;margin-bottom:14px">勾选角色拥有的功能权限，保存后立即生效（权限在服务端强制校验，前端仅作展示）。</div>
+          <div class="btn-row" style="margin-bottom:16px">
+            <span style="font-size:13px;color:var(--muted)">选择角色</span>
+            <select id="permRoleSelect" onchange="loadRolePerms(this.value)"></select>
+            <button class="btn" onclick="saveRolePerms()">保存权限</button>
+          </div>
+          <div id="permList"></div>
+        </div>
+      </section>
+
       <!-- 智能问答 -->
       <section class="page" id="page-assistant">
         <div class="panel">
@@ -252,7 +267,8 @@ var currentDevice = null;
 var TOKEN_KEY = 'sl_token';
 var USER_KEY = 'sl_user';
 var PAGES = {
-  dashboard:'仪表盘', devices:'设备管理', alarms:'告警管理', accounts:'账号管理', assistant:'智能问答'
+  dashboard:'仪表盘', devices:'设备管理', alarms:'告警管理', accounts:'账号管理',
+  permissions:'权限管理', assistant:'智能问答'
 };
 
 function getToken(){ return localStorage.getItem(TOKEN_KEY) || ''; }
@@ -306,6 +322,7 @@ function showPage(name, el){
   document.getElementById('pageTitle').textContent = PAGES[name] || name;
   if (name === 'accounts') { loadUsers(); loadRoles(); }
   if (name === 'alarms') { loadAlarms(); }
+  if (name === 'permissions') { loadPermPage(); }
 }
 
 function afterLogin(){
@@ -338,6 +355,37 @@ function setRange(h, btn){
 function fmtDay(d){
   function p(n){ return (n<10?'0':'')+n; }
   return p(d.getMonth()+1)+'-'+p(d.getDate());
+}
+
+function fmtHour(d){
+  function p(n){ return (n<10?'0':'')+n; }
+  return p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':00';
+}
+
+// 历史光照：按小时聚合展示（最近 24 小时，每小时一条平均光照）
+async function loadHistoryTable(){
+  if (!currentDevice) return;
+  try {
+    var to = new Date();
+    var from = new Date(Date.now() - 24*3600*1000);
+    var rows = await api('/api/devices/' + currentDevice + '/lux/history?from=' + from.toISOString() + '&to=' + to.toISOString());
+    var byHour = {};
+    rows.forEach(function(r){
+      var d = new Date(r.created_at);
+      var key = Math.floor(d.getTime()/3600000)*3600000;
+      if (!byHour[key]) byHour[key] = [];
+      byHour[key].push(r.lux);
+    });
+    var nowHour = Math.floor(to.getTime()/3600000)*3600000;
+    var out = [];
+    for (var i = 23; i >= 0; i--) {
+      var t = nowHour - i*3600000;
+      var arr = byHour[t];
+      var val = arr ? Math.round(arr.reduce(function(a,b){return a+b;},0)/arr.length) : '--';
+      out.push('<tr><td>'+(24-i)+'</td><td>'+val+'</td><td>'+fmtHour(new Date(t))+'</td></tr>');
+    }
+    document.getElementById('histTbody').innerHTML = out.join('');
+  } catch(e){ console.warn('loadHistoryTable:', e); }
 }
 
 // 近 7 天告警趋势（柱状图）
@@ -516,16 +564,6 @@ function toggleHist(){
   }
 }
 
-async function loadHistoryTable(){
-  if (!currentDevice) return;
-  try {
-    var rows = await api('/api/devices/' + currentDevice + '/lux/history?limit=100');
-    document.getElementById('histTbody').innerHTML = (rows||[]).slice(0,100).map(function(r, i){
-      return '<tr><td>'+(i+1)+'</td><td>'+r.lux+'</td><td>'+fmtTime(r.created_at)+'</td></tr>';
-    }).join('') || '<tr><td colspan="3" style="color:#9AA3AF">暂无数据</td></tr>';
-  } catch(e){}
-}
-
 async function askAssistant(){
   var input = document.getElementById('askInput');
   var q = input.value.trim();
@@ -609,6 +647,57 @@ async function deleteUser(id){
     toast('账号已删除');
     loadUsers();
   } catch(e){ toast('删除失败: ' + e.message); }
+}
+
+// ---------- 角色权限管理 ----------
+var allPerms = [];
+
+async function loadPermPage(){
+  try {
+    var roles = await api('/api/roles');
+    var sel = document.getElementById('permRoleSelect');
+    sel.innerHTML = roles.map(function(r){
+      return '<option value="'+r.id+'">'+r.role_name+'</option>';
+    }).join('');
+    allPerms = await api('/api/permissions');
+    loadRolePerms(sel.value);
+  } catch(e){ console.warn('loadPermPage:', e); }
+}
+
+async function loadRolePerms(roleId){
+  if (!roleId) return;
+  try {
+    var ids = await api('/api/roles/' + roleId + '/permissions');
+    var modules = {};
+    allPerms.forEach(function(p){
+      (modules[p.module] = modules[p.module] || []).push(p);
+    });
+    var html = '';
+    Object.keys(modules).forEach(function(m){
+      html += '<div style="margin-bottom:12px"><div style="font-weight:600;font-size:13px;color:var(--muted);margin-bottom:8px">'+m+'</div><div class="btn-row" style="gap:8px">';
+      modules[m].forEach(function(p){
+        html += '<label style="display:inline-flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:8px;padding:7px 12px;cursor:pointer;font-size:13px;background:#fff;transition:border-color .15s">'+
+          '<input type="checkbox" data-pid="'+p.id+'" '+(ids.indexOf(p.id) >= 0 ? 'checked':'')+'> '+p.perm_name+'</label>';
+      });
+      html += '</div></div>';
+    });
+    document.getElementById('permList').innerHTML = html || '<span style="color:#9AA3AF">无权限项</span>';
+  } catch(e){ console.warn('loadRolePerms:', e); }
+}
+
+async function saveRolePerms(){
+  var roleId = document.getElementById('permRoleSelect').value;
+  var boxes = document.querySelectorAll('#permList input:checked');
+  var ids = [];
+  for (var i = 0; i < boxes.length; i++) ids.push(parseInt(boxes[i].getAttribute('data-pid')));
+  try {
+    await api('/api/roles/' + roleId + '/permissions', {
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({permission_ids:ids})
+    });
+    toast('权限已保存，立即生效');
+  } catch(e){ toast('保存失败: ' + e.message); }
 }
 
 async function setLamp(action){
