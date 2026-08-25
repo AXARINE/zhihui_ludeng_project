@@ -10,11 +10,15 @@ use crate::api::LampAction;
 
 type HmacSha256 = Hmac<Sha256>;
 
-fn sha256_hex(data: &[u8]) -> String {
+pub fn sha256_hex(data: &[u8]) -> String {
     hex::encode(Sha256::digest(data))
 }
 
-fn hmac_raw(key: &[u8], data: &[u8]) -> Vec<u8> {
+/// HMAC-SHA256 原始输出(接受任意长度 key)
+///
+/// # Panics
+/// HMAC-SHA256 对任意长度 key 均可用,此函数实际不会 panic。
+pub fn hmac_raw(key: &[u8], data: &[u8]) -> Vec<u8> {
     let mut mac =
         HmacSha256::new_from_slice(key).expect("hmac accepts any key length");
     mac.update(data);
@@ -153,13 +157,6 @@ impl IothubClient {
         format!("/v5/iot/{}{}", self.project_id, path)
     }
 
-    /// 按华为云 V11-HMAC-SHA256 衍生签名算法生成 Authorization 头
-    ///
-    /// `IoTDA` 标准版/企业版实例必须使用衍生签名(官方 SDK: `WithDerivedPredicate`);
-    /// 基础版共享域名才用旧版 SDK-HMAC-SHA256。与官方 SDK `derived_signer.go` 对齐:
-    /// 1. info = {YYYYMMDD}/{region}/iotdm,service 固定 "iotdm"
-    /// 2. 派生密钥 = HKDF(SHA-256, ikm=SK, salt=AK, info=info) 的 32 字节,再 hex 编码后作为 HMAC key
-    /// 3. 规范 URI 以 '/' 结尾、规范头部块与 `SignedHeaders` 之间多一个空行(与旧算法相同)
     fn sign(
         &self,
         method: &str,
@@ -167,39 +164,15 @@ impl IothubClient {
         sdk_date: &str,
         body: &str,
     ) -> String {
-        let signed_headers = "content-type;host;x-sdk-date";
-        let canonical_headers = format!(
-            "content-type:application/json\nhost:{}\nx-sdk-date:{}\n",
+        sign_derived(
+            &self.ak,
+            &self.sk,
+            &self.region,
             self.host(),
-            sdk_date
-        );
-        let canonical_request = format!(
-            "{}\n{}/\n\n{}\n{}\n{}",
             method,
             uri,
-            canonical_headers,
-            signed_headers,
-            sha256_hex(body.as_bytes())
-        );
-        let info = format!("{}/{}/iotdm", &sdk_date[..8], self.region);
-        // HKDF-Extract: PRK = HMAC(salt=AK, data=SK); HKDF-Expand: T1 = HMAC(key=PRK, data=info||0x01)
-        let prk = hmac_raw(self.ak.as_bytes(), self.sk.as_bytes());
-        let mut expand = info.as_bytes().to_vec();
-        expand.push(0x01);
-        let derived_key_hex = hex::encode(hmac_raw(&prk, &expand));
-        let string_to_sign = format!(
-            "V11-HMAC-SHA256\n{}\n{}\n{}",
             sdk_date,
-            info,
-            sha256_hex(canonical_request.as_bytes())
-        );
-        let mut mac = HmacSha256::new_from_slice(derived_key_hex.as_bytes())
-            .expect("hmac accepts any key length");
-        mac.update(string_to_sign.as_bytes());
-        let signature = hex::encode(mac.finalize().into_bytes());
-        format!(
-            "V11-HMAC-SHA256 Credential={}/{}, SignedHeaders={}, Signature={}",
-            self.ak, info, signed_headers, signature
+            body,
         )
     }
 
@@ -324,6 +297,58 @@ impl IothubClient {
         .await?;
         Ok(())
     }
+}
+
+/// 按华为云 V11-HMAC-SHA256 衍生签名算法生成 Authorization 头(纯函数)
+///
+/// `IoTDA` 标准版/企业版实例必须使用衍生签名(官方 SDK: `WithDerivedPredicate`);
+/// 基础版共享域名才用旧版 SDK-HMAC-SHA256。与官方 SDK `derived_signer.go` 对齐:
+/// 1. info = {YYYYMMDD}/{region}/iotdm,service 固定 "iotdm"
+/// 2. 派生密钥 = HKDF(SHA-256, ikm=SK, salt=AK, info=info) 的 32 字节,再 hex 编码后作为 HMAC key
+/// 3. 规范 URI 以 '/' 结尾、规范头部块与 `SignedHeaders` 之间多一个空行(与旧算法相同)
+///
+/// # Panics
+/// `sdk_date` 短于 8 字节(YYYYMMDD 前缀)时 panic;调用方保证传入合法日期串。
+#[allow(clippy::too_many_arguments)]
+pub fn sign_derived(
+    ak: &str,
+    sk: &str,
+    region: &str,
+    host: &str,
+    method: &str,
+    uri: &str,
+    sdk_date: &str,
+    body: &str,
+) -> String {
+    let signed_headers = "content-type;host;x-sdk-date";
+    let canonical_headers = format!(
+        "content-type:application/json\nhost:{host}\nx-sdk-date:{sdk_date}\n"
+    );
+    let canonical_request = format!(
+        "{}\n{}/\n\n{}\n{}\n{}",
+        method,
+        uri,
+        canonical_headers,
+        signed_headers,
+        sha256_hex(body.as_bytes())
+    );
+    let info = format!("{}/{region}/iotdm", &sdk_date[..8]);
+    // HKDF-Extract: PRK = HMAC(salt=AK, data=SK); HKDF-Expand: T1 = HMAC(key=PRK, data=info||0x01)
+    let prk = hmac_raw(ak.as_bytes(), sk.as_bytes());
+    let mut expand = info.as_bytes().to_vec();
+    expand.push(0x01);
+    let derived_key_hex = hex::encode(hmac_raw(&prk, &expand));
+    let string_to_sign = format!(
+        "V11-HMAC-SHA256\n{sdk_date}\n{info}\n{}",
+        sha256_hex(canonical_request.as_bytes())
+    );
+    let mut mac = HmacSha256::new_from_slice(derived_key_hex.as_bytes())
+        .expect("hmac accepts any key length");
+    mac.update(string_to_sign.as_bytes());
+    let signature = hex::encode(mac.finalize().into_bytes());
+    format!(
+        "V11-HMAC-SHA256 Credential={ak}/{info}, SignedHeaders={signed_headers}, Signature={signature}"
+    )
 }
 
 /// 轮询任务:周期性并发拉取各设备影子/状态入库

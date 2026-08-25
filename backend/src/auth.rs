@@ -16,7 +16,7 @@ use axum::http::request::Parts;
 use axum::http::{Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post, put};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use jsonwebtoken::{
@@ -132,7 +132,7 @@ pub async fn auth_middleware(
     next.run(req).await
 }
 
-fn is_public(path: &str, method: &Method) -> bool {
+pub fn is_public(path: &str, method: &Method) -> bool {
     method == Method::OPTIONS
         || path == "/api/health"
         || path == "/api/auth/login"
@@ -150,7 +150,7 @@ pub fn hash_password(password: &str) -> Result<String, Error> {
         .map_err(|e| Error::Internal(format!("密码哈希失败: {e}")))
 }
 
-fn verify_password(password: &str, hashed: &str) -> bool {
+pub fn verify_password(password: &str, hashed: &str) -> bool {
     PasswordHash::new(hashed).is_ok_and(|parsed| {
         Argon2::default()
             .verify_password(password.as_bytes(), &parsed)

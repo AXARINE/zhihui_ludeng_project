@@ -3,6 +3,8 @@ mod assistant;
 mod auth;
 mod iothub;
 mod openapi;
+#[cfg(test)]
+mod tests;
 
 use axum::Router;
 use iothub::IothubClient;
