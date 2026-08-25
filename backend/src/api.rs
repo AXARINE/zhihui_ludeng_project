@@ -1,4 +1,5 @@
 use crate::AppState;
+use crate::assistant;
 use crate::auth::Auth;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
@@ -289,6 +290,9 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/lux/latest", get(global_lux_latest))
         .route("/api/commands", get(list_global_commands))
         .route("/api/dashboard", get(dashboard))
+        .route("/api/assistant/ask", post(assistant_ask))
+        // 允许前端页面跨域访问(开发期放开,上线前按需收紧)
+        .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(state)
 }
 
@@ -939,4 +943,20 @@ async fn dashboard(State(s): State<Arc<AppState>>, auth: Auth) -> Result<Json<Da
             auto_24h: commands.auto_24h,
         },
     }))
+}
+
+/// POST /api/assistant/ask —— 维护智能问答（本地知识库检索，无需外部大模型）
+#[derive(Deserialize)]
+struct AssistantAskIn {
+    question: String,
+}
+
+async fn assistant_ask(
+    State(s): State<Arc<AppState>>,
+    auth: Auth,
+    Json(body): Json<AssistantAskIn>,
+) -> Result<Json<serde_json::Value>, Error> {
+    auth.require(&s.db, "assistant:qa").await?;
+    let answer = assistant::answer(&s.db, &body.question).await?;
+    Ok(Json(serde_json::json!({ "answer": answer })))
 }

@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>智慧路灯监控台</title>
+<script src="https://cdn.bootcdn.net/ajax/libs/echarts/5.5.0/echarts.min.js"></script>
+<style>
+  :root {
+    --primary:#2F6FED; --primary-weak:#EAF1FE;
+    --ok:#0FA46E; --warn:#E8A13D; --danger:#E5484D; --off:#8A94A6;
+    --bg:#F5F7FA; --card:#FFFFFF; --border:#E8ECF1;
+    --text:#1F2937; --muted:#6B7280;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:"PingFang SC","Microsoft YaHei",-apple-system,sans-serif; background:var(--bg); color:var(--text); font-size:14px; -webkit-font-smoothing:antialiased; }
+  header { display:flex; align-items:center; justify-content:space-between; padding:16px 28px; background:var(--card); border-bottom:1px solid var(--border); box-shadow:0 1px 2px rgba(16,24,40,.04); position:sticky; top:0; z-index:50; }
+  header h1 { font-size:18px; font-weight:600; color:var(--primary); display:flex; align-items:center; gap:8px; }
+  header h1::before { content:""; width:8px; height:20px; border-radius:3px; background:linear-gradient(180deg,var(--primary),#5B8DEF); }
+  header select { padding:7px 12px; border:1px solid var(--border); border-radius:8px; font-size:13px; min-width:260px; background:#fff; color:var(--text); outline:none; }
+  header select:focus { border-color:var(--primary); }
+  .container { max-width:1240px; margin:0 auto; padding:22px 28px; display:flex; gap:18px; align-items:flex-start; }
+  .main { flex:1; min-width:0; }
+  .side { width:370px; flex-shrink:0; position:sticky; top:78px; height:calc(100vh - 100px); }
+  .side .panel { height:100%; display:flex; flex-direction:column; margin-bottom:0; }
+  .side .panel h3 { flex-shrink:0; }
+  .side .btn-row { flex-shrink:0; }
+  .cards { display:grid; grid-template-columns:repeat(5,1fr); gap:16px; margin-bottom:18px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:18px; box-shadow:0 1px 3px rgba(16,24,40,.06); transition:transform .15s ease, box-shadow .15s ease; }
+  .card:hover { transform:translateY(-2px); box-shadow:0 6px 16px rgba(16,24,40,.08); }
+  .card .label { font-size:12px; color:var(--muted); margin-bottom:8px; letter-spacing:.3px; }
+  .card .value { font-size:30px; font-weight:700; letter-spacing:-.5px; color:var(--text); }
+  .card .value.on { color:var(--ok); } .card .value.off { color:var(--off); } .card .value.warn { color:var(--warn); }
+  .card .sub { font-size:12px; color:var(--muted); margin-top:4px; }
+  .panel { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:18px 20px; margin-bottom:18px; box-shadow:0 1px 3px rgba(16,24,40,.06); }
+  .panel h3 { font-size:15px; font-weight:600; margin-bottom:14px; color:var(--text); display:flex; align-items:center; gap:8px; }
+  .panel h3::before { content:""; width:4px; height:14px; border-radius:2px; background:var(--primary); }
+  .panel h3.spread { justify-content:space-between; }
+  .btn-row { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .btn { padding:8px 22px; border:1px solid var(--border); border-radius:8px; background:#fff; color:var(--text); font-size:14px; cursor:pointer; transition:all .15s ease; }
+  .btn:hover { border-color:var(--primary); color:var(--primary); }
+  .btn:disabled { opacity:.5; cursor:not-allowed; }
+  .btn.on { background:var(--ok); color:#fff; border-color:var(--ok); }
+  .btn.on:hover { opacity:.9; }
+  .btn.off { background:var(--off); color:#fff; border-color:var(--off); }
+  .btn.off:hover { opacity:.9; }
+  .btn.auto { background:var(--primary); color:#fff; border-color:var(--primary); }
+  .btn.auto:hover { opacity:.9; }
+  .btn.small { padding:5px 14px; font-size:13px; }
+  .btn.active { background:var(--primary); color:#fff; border-color:var(--primary); }
+  .btn.danger { color:var(--danger); border-color:var(--danger); }
+  .btn.danger:hover { background:var(--danger); color:#fff; }
+  .threshold-box { display:flex; gap:8px; align-items:center; }
+  input, select { border:1px solid var(--border); border-radius:8px; font-size:13px; padding:8px 10px; outline:none; background:#fff; color:var(--text); }
+  input:focus, select:focus { border-color:var(--primary); }
+  .threshold-box input { width:100px; }
+  .range-bar { display:flex; gap:8px; margin-bottom:12px; }
+  #chart { width:100%; height:320px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:10px 12px; border-bottom:1px solid #F0F2F5; }
+  th { color:var(--muted); font-weight:500; background:#F9FAFB; font-size:12px; }
+  tbody tr:hover { background:#F8FAFF; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px; vertical-align:middle; }
+  .dot.ok { background:var(--ok); } .dot.bad { background:var(--danger); } .dot.gray { background:var(--off); }
+  .tag { display:inline-block; padding:2px 10px; border-radius:10px; font-size:12px; }
+  .tag.unsolved { background:#FDEBEC; color:var(--danger); }
+  .tag.solved { background:#E6F6EF; color:var(--ok); }
+  #toast { position:fixed; top:22px; left:50%; transform:translateX(-50%); background:rgba(17,24,39,.92); color:#fff; padding:10px 22px; border-radius:10px; font-size:13px; opacity:0; transition:opacity .3s; z-index:99; pointer-events:none; box-shadow:0 4px 14px rgba(0,0,0,.18); }
+  #loginMask { position:fixed; inset:0; background:rgba(17,24,39,.45); backdrop-filter:blur(4px); display:flex; align-items:center; justify-content:center; z-index:100; }
+  #loginBox { background:#fff; border-radius:16px; padding:36px 40px; width:340px; box-shadow:0 12px 40px rgba(0,0,0,.22); }
+  #loginBox h2 { font-size:18px; margin-bottom:20px; color:var(--text); text-align:center; }
+  #loginBox input { width:100%; padding:11px 12px; margin-bottom:12px; font-size:14px; }
+  #loginBox button { width:100%; padding:11px; border:none; border-radius:9px; background:var(--primary); color:#fff; font-size:14px; cursor:pointer; }
+  #loginBox button:hover { opacity:.9; }
+  #loginErr { color:var(--danger); font-size:12px; margin-bottom:10px; min-height:16px; text-align:center; }
+  #chatBox { flex:1; min-height:220px; overflow-y:auto; background:#FAFBFC; border:1px solid var(--border); border-radius:10px; padding:12px; margin-bottom:10px; font-size:13px; line-height:1.75; white-space:pre-wrap; }
+  #chatBox div.qa-user { margin-bottom:8px; }
+  #chatBox div.qa-bot { margin-bottom:12px; }
+  #chatBox b.q { color:var(--primary); } #chatBox b.a { color:var(--ok); }
+  #askInput { flex:1; min-width:0; }
+  .collapse { display:none; }
+  .user-form input { width:110px; }
+  .user-form select { width:120px; }
+</style>
+</head>
+<body>
+<div id="loginMask">
+  <div id="loginBox">
+    <h2>智慧路灯监控台 · 登录</h2>
+    <div id="loginErr"></div>
+    <input id="loginUser" placeholder="用户名" value="admin">
+    <input id="loginPass" type="password" placeholder="密码">
+    <button onclick="doLogin()">登 录</button>
+  </div>
+</div>
+<header>
+  <h1>智慧路灯监控台</h1>
+  <div>
+    <span style="font-size:13px;color:var(--muted);margin-right:8px">选择设备</span>
+    <select id="deviceSelect" onchange="selectDevice(this.value)"></select>
+  </div>
+</header>
+
+<div class="container">
+  <div class="main">
+    <div class="cards">
+      <div class="card"><div class="label">光照强度</div><div class="value" id="lux">--</div><div class="sub">单位：lux</div></div>
+      <div class="card"><div class="label">灯状态</div><div class="value" id="lamp">--</div></div>
+      <div class="card"><div class="label">控制模式</div><div class="value" id="mode">--</div></div>
+      <div class="card"><div class="label">设备状态</div><div class="value" id="status">--</div></div>
+      <div class="card"><div class="label">最近上报</div><div class="value" style="font-size:17px" id="lastSeen">--</div></div>
+    </div>
+
+    <div class="panel">
+      <h3>设备控制</h3>
+      <div class="btn-row">
+        <button class="btn on" onclick="setLamp('on')">开灯</button>
+        <button class="btn off" onclick="setLamp('off')">关灯</button>
+        <button class="btn auto" onclick="setLamp('auto')">自动联动</button>
+        <span style="width:20px"></span>
+        <span style="font-size:13px;color:var(--muted)">光照联动阈值</span>
+        <div class="threshold-box">
+          <input type="number" id="thresholdInput" min="0" max="1000" step="10">
+          <span style="font-size:13px;color:var(--muted)">lux</span>
+          <button class="btn" id="saveThresholdBtn" onclick="saveThreshold()">保存阈值</button>
+        </div>
+      </div>
+      <div style="margin-top:10px;font-size:12px;color:#9AA3AF">提示：阈值下发/控灯首次约需 20~35 秒（IoTDA 下行通道预热），下发后请稍候。</div>
+    </div>
+
+    <div class="panel">
+      <h3>光照趋势</h3>
+      <div class="range-bar">
+        <button class="btn small active" data-h="1" onclick="setRange(1,this)">近1小时</button>
+        <button class="btn small" data-h="6" onclick="setRange(6,this)">近6小时</button>
+        <button class="btn small" data-h="24" onclick="setRange(24,this)">近24小时</button>
+      </div>
+      <div id="chart"></div>
+    </div>
+
+    <div class="panel">
+      <h3 class="spread">历史光照数据<button class="btn small" id="histToggle" onclick="toggleHist()">展开</button></h3>
+      <div id="histWrap" class="collapse">
+        <table><thead><tr><th>#</th><th>光照 (lux)</th><th>时间</th></tr></thead><tbody id="histTbody"></tbody></table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>告警记录</h3>
+      <table><thead><tr><th>类型</th><th>内容</th><th>时间</th><th>状态</th></tr></thead><tbody id="alarmTbody"></tbody></table>
+    </div>
+
+    <div class="panel">
+      <h3>设备列表</h3>
+      <table><thead><tr><th>设备ID</th><th>名称</th><th>位置</th><th>状态</th><th>灯</th><th>模式</th><th>最近上报</th></tr></thead><tbody id="devTbody"></tbody></table>
+    </div>
+
+    <div class="panel">
+      <h3>账号管理</h3>
+      <div class="btn-row user-form" style="margin-bottom:14px">
+        <input id="newUsername" placeholder="用户名">
+        <input id="newPassword" type="password" placeholder="密码">
+        <input id="newRealName" placeholder="姓名">
+        <select id="newRole"></select>
+        <button class="btn" onclick="createUser()">新增账号</button>
+      </div>
+      <table><thead><tr><th>用户名</th><th>姓名</th><th>角色</th><th>状态</th><th>操作</th></tr></thead><tbody id="userTbody"></tbody></table>
+    </div>
+  </div>
+
+  <div class="side">
+    <div class="panel">
+      <h3>维护智能问答</h3>
+      <div id="chatBox"></div>
+      <div class="btn-row">
+        <input id="askInput" placeholder="例如：最近有哪些告警？" onkeydown="if(event.key==='Enter')askAssistant()">
+        <button class="btn" onclick="askAssistant()">发送</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+var API = 'http://localhost:8080';
+var currentDevice = null;
+var TOKEN_KEY = 'sl_token';
+
+function getToken(){ return localStorage.getItem(TOKEN_KEY) || ''; }
+function setToken(t){ localStorage.setItem(TOKEN_KEY, t); }
+function showLogin(){ document.getElementById('loginMask').style.display = 'flex'; }
+function hideLogin(){ document.getElementById('loginMask').style.display = 'none'; }
+
+async function doLogin(){
+  var u = document.getElementById('loginUser').value.trim();
+  var p = document.getElementById('loginPass').value;
+  var err = document.getElementById('loginErr');
+  err.textContent = '';
+  try {
+    var r = await fetch(API + '/api/auth/login', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({username:u, password:p})
+    });
+    if (!r.ok) { err.textContent = '用户名或密码错误'; return; }
+    var data = await r.json();
+    setToken(data.token);
+    hideLogin();
+    loadDevices();
+    loadUsers();
+    loadRoles();
+  } catch(e){ err.textContent = '无法连接后端: ' + e.message; }
+}
+
+var chart = echarts.init(document.getElementById('chart'));
+var currentHours = 1;
+var chartOpt = {
+  title: { text:'光照趋势（近1小时）', left:12, textStyle:{fontSize:14,color:'#1F2937'} },
+  tooltip: { trigger:'axis' },
+  grid: { left:50, right:20, top:40, bottom:30 },
+  xAxis: { type:'category', data:[], axisLine:{lineStyle:{color:'#D8DEE6'}} },
+  yAxis: { type:'value', name:'lux', axisLine:{lineStyle:{color:'#D8DEE6'}} },
+  series: [{ name:'光照强度', type:'line', smooth:true, showSymbol:false,
+             lineStyle:{width:2,color:'#2F6FED'}, areaStyle:{color:'rgba(47,111,237,0.08)'} }]
+};
+
+function setRange(h, btn){
+  currentHours = h;
+  var btns = document.querySelectorAll('.range-bar .btn');
+  for (var i = 0; i < btns.length; i++) btns[i].className = 'btn small';
+  btn.className = 'btn small active';
+  loadHistory();
+}
+
+function toast(msg){
+  var el = document.getElementById('toast');
+  el.textContent = msg;
+  el.style.opacity = 1;
+  setTimeout(function(){ el.style.opacity = 0; }, 3500);
+}
+
+async function api(path, opts){
+  opts = opts || {};
+  var headers = opts.headers || {};
+  if (getToken()) headers['Authorization'] = 'Bearer ' + getToken();
+  opts.headers = headers;
+  var r = await fetch(API + path, opts);
+  if (r.status === 401) { showLogin(); throw new Error('未登录或登录过期'); }
+  if (!r.ok && r.status !== 204) throw new Error('HTTP ' + r.status + ': ' + (await r.text()).slice(0,200));
+  if (r.status === 204) return null;
+  var text = await r.text();
+  return text ? JSON.parse(text) : null;
+}
+
+function fmtTime(iso){
+  if (!iso) return '-';
+  var d = new Date(iso);
+  if (isNaN(d)) return iso;
+  function p(n){ return (n<10?'0':'')+n; }
+  return p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())+':'+p(d.getSeconds());
+}
+
+function setCard(id, text, cls){
+  var el = document.getElementById(id);
+  el.textContent = text;
+  el.className = 'value' + (cls ? ' ' + cls : '');
+}
+
+async function loadDevices(){
+  try {
+    var list = await api('/api/devices');
+    var sel = document.getElementById('deviceSelect');
+    sel.innerHTML = list.map(function(d){
+      return '<option value="'+d.id+'">'+(d.name||d.id)+'</option>';
+    }).join('');
+    document.getElementById('devTbody').innerHTML = list.map(function(d){
+      var ok = d.status === 'online';
+      return '<tr><td>'+d.id+'</td><td>'+(d.name||'-')+'</td><td>'+(d.location||'-')+'</td>'+
+        '<td><span class="dot '+(ok?'ok':'bad')+'"></span>'+(ok?'在线':'离线')+'</td>'+
+        '<td>'+(d.lamp==='on'?'亮':'灭')+'</td><td>'+(d.mode||'-')+'</td><td>'+fmtTime(d.last_seen_at)+'</td></tr>';
+    }).join('');
+    if (!currentDevice && list.length) {
+      sel.value = list[0].id;
+      selectDevice(list[0].id);
+    }
+  } catch(e) { console.warn('loadDevices:', e); }
+}
+
+function selectDevice(id){
+  currentDevice = id;
+  loadLatest();
+  loadThreshold();
+  loadHistory();
+  loadAlarms();
+}
+
+async function loadLatest(){
+  if (!currentDevice) return;
+  try {
+    var d = await api('/api/devices/' + currentDevice + '/lux/latest');
+    if (d) setCard('lux', d.lux != null ? d.lux : '--');
+  } catch(e){}
+  try {
+    var list = await api('/api/devices');
+    var dev = list.find(function(x){ return x.id === currentDevice; });
+    if (dev) {
+      setCard('lamp', dev.lamp === 'on' ? '亮' : '灭', dev.lamp === 'on' ? 'on' : 'off');
+      setCard('mode', dev.mode || '-');
+      setCard('status', dev.status === 'online' ? '在线' : '离线', dev.status === 'online' ? 'on' : 'off');
+      setCard('lastSeen', fmtTime(dev.last_seen_at));
+    }
+  } catch(e){}
+}
+
+async function loadThreshold(){
+  if (!currentDevice) return;
+  try {
+    var t = await api('/api/devices/' + currentDevice + '/threshold');
+    document.getElementById('thresholdInput').value = t.threshold;
+  } catch(e){}
+}
+
+async function loadHistory(){
+  if (!currentDevice) return;
+  try {
+    var to = new Date();
+    var from = new Date(Date.now() - currentHours*3600*1000);
+    var rows = await api('/api/devices/' + currentDevice + '/lux/history?from=' + from.toISOString() + '&to=' + to.toISOString());
+    var bucketMs = currentHours >= 24 ? 3600*1000 : (currentHours >= 6 ? 5*60*1000 : 60*1000);
+    var byMin = {};
+    rows.forEach(function(r){
+      var d = new Date(r.created_at);
+      var key = Math.floor(d.getTime()/bucketMs)*bucketMs;
+      if (!byMin[key]) byMin[key] = [];
+      byMin[key].push(r.lux);
+    });
+    var keys = Object.keys(byMin).sort();
+    chartOpt.title.text = '光照趋势（近' + currentHours + '小时）';
+    chartOpt.xAxis.data = keys.map(function(k){ return fmtTime(new Date(parseInt(k))).slice(0,16); });
+    chartOpt.series[0].data = keys.map(function(k){
+      var arr = byMin[k];
+      return Math.round(arr.reduce(function(a,b){return a+b;},0)/arr.length);
+    });
+    chart.setOption(chartOpt, true);
+  } catch(e){ console.warn('loadHistory:', e); }
+}
+
+function toggleHist(){
+  var wrap = document.getElementById('histWrap');
+  var btn = document.getElementById('histToggle');
+  if (wrap.className === 'collapse') {
+    wrap.className = '';
+    btn.textContent = '收起';
+    loadHistoryTable();
+  } else {
+    wrap.className = 'collapse';
+    btn.textContent = '展开';
+  }
+}
+
+async function loadHistoryTable(){
+  if (!currentDevice) return;
+  try {
+    var rows = await api('/api/devices/' + currentDevice + '/lux/history?limit=100');
+    document.getElementById('histTbody').innerHTML = (rows||[]).slice(0,100).map(function(r, i){
+      return '<tr><td>'+(i+1)+'</td><td>'+r.lux+'</td><td>'+fmtTime(r.created_at)+'</td></tr>';
+    }).join('') || '<tr><td colspan="3" style="color:#9AA3AF">暂无数据</td></tr>';
+  } catch(e){}
+}
+
+async function askAssistant(){
+  var input = document.getElementById('askInput');
+  var q = input.value.trim();
+  if (!q) return;
+  var box = document.getElementById('chatBox');
+  box.innerHTML += '<div class="qa-user"><b class="q">问：</b>'+escapeHtml(q)+'</div>';
+  input.value = '';
+  box.scrollTop = box.scrollHeight;
+  try {
+    var d = await api('/api/assistant/ask', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({question:q})
+    });
+    box.innerHTML += '<div class="qa-bot"><b class="a">答：</b>'+escapeHtml(d.answer)+'</div>';
+  } catch(e){
+    box.innerHTML += '<div class="qa-bot" style="color:var(--danger)">回答失败：'+escapeHtml(e.message)+'</div>';
+  }
+  box.scrollTop = box.scrollHeight;
+}
+
+function escapeHtml(s){
+  return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+async function loadAlarms(){
+  try {
+    var rows = await api('/api/alarms');
+    document.getElementById('alarmTbody').innerHTML = rows.slice(0,50).map(function(a){
+      var solved = !!a.resolved_at;
+      return '<tr><td>'+a.type+'</td><td>'+a.message+'</td><td>'+fmtTime(a.created_at)+'</td>'+
+        '<td><span class="tag '+(solved?'solved':'unsolved')+'">'+(solved?'已消解':'未处理')+'</span></td></tr>';
+    }).join('') || '<tr><td colspan="4" style="color:#9AA3AF">暂无告警</td></tr>';
+  } catch(e){}
+}
+
+async function loadUsers(){
+  try {
+    var rows = await api('/api/users');
+    document.getElementById('userTbody').innerHTML = rows.map(function(u){
+      return '<tr><td>'+u.username+'</td><td>'+(u.real_name||'-')+'</td><td>'+u.role_name+'</td>'+
+        '<td>'+(u.status===1?'启用':'停用')+'</td>'+
+        '<td><button class="btn small danger" onclick="deleteUser('+u.id+')">删除</button></td></tr>';
+    }).join('') || '<tr><td colspan="5" style="color:#9AA3AF">暂无账号</td></tr>';
+  } catch(e){ console.warn('loadUsers:', e); }
+}
+
+async function loadRoles(){
+  try {
+    var roles = await api('/api/roles');
+    document.getElementById('newRole').innerHTML = roles.map(function(r){
+      return '<option value="'+r.id+'">'+r.role_name+'</option>';
+    }).join('');
+  } catch(e){ console.warn('loadRoles:', e); }
+}
+
+async function createUser(){
+  var username = document.getElementById('newUsername').value.trim();
+  var password = document.getElementById('newPassword').value;
+  var realName = document.getElementById('newRealName').value.trim();
+  var roleId = parseInt(document.getElementById('newRole').value);
+  if (!username || !password) { toast('用户名和密码必填'); return; }
+  try {
+    await api('/api/users', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({username:username, password:password, real_name:realName||username, role_id:roleId})
+    });
+    toast('账号已创建');
+    document.getElementById('newUsername').value = '';
+    document.getElementById('newPassword').value = '';
+    document.getElementById('newRealName').value = '';
+    loadUsers();
+  } catch(e){ toast('创建失败: ' + e.message); }
+}
+
+async function deleteUser(id){
+  if (!confirm('确定删除该账号？')) return;
+  try {
+    await api('/api/users/' + id, { method:'DELETE' });
+    toast('账号已删除');
+    loadUsers();
+  } catch(e){ toast('删除失败: ' + e.message); }
+}
+
+async function setLamp(action){
+  if (!currentDevice) return;
+  try {
+    await api('/api/devices/' + currentDevice + '/lamp', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({action:action})
+    });
+    toast('已下发「'+action+'」命令，等待设备执行（首次约 20~35 秒）...');
+    setTimeout(loadLatest, 15000);
+  } catch(e){ toast('下发失败: ' + e.message); }
+}
+
+async function saveThreshold(){
+  if (!currentDevice) return;
+  var v = parseInt(document.getElementById('thresholdInput').value);
+  if (isNaN(v)) { toast('请输入有效阈值'); return; }
+  var btn = document.getElementById('saveThresholdBtn');
+  btn.disabled = true;
+  btn.textContent = '下发中...';
+  try {
+    await api('/api/devices/' + currentDevice + '/threshold', {
+      method:'PUT',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({threshold:v})
+    });
+    toast('阈值已下发为 ' + v + ' lux');
+  } catch(e){
+    toast('下发失败: ' + e.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '保存阈值';
+  }
+}
+
+// 启动：有 token 直接加载，否则显示登录
+if (getToken()) {
+  hideLogin();
+  loadDevices();
+  loadUsers();
+  loadRoles();
+} else {
+  showLogin();
+}
+setInterval(loadDevices, 15000);
+setInterval(function(){ if (currentDevice) { loadLatest(); } }, 10000);
+setInterval(loadHistory, 20000);
+setInterval(loadAlarms, 30000);
+</script>
+</body>
+</html>
