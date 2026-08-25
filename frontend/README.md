@@ -15,7 +15,8 @@
 
 2. **打开页面**：直接用浏览器打开本目录的 `index.html`（`file://` 即可，后端已放开 CORS）。
 
-3. **登录**：默认管理员账号 `admin / admin123`（首次启动后端自动创建，可用环境变量 `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD` 覆盖）。
+3.**登录**：默认管理员账号 `admin / admin123`（首次启动后端自动创建，可用环境变量 `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD` 覆盖）。
+**登录**：系统管理员账号 `superadmin / superadmin123`（拥有全部权限，包括账号管理权限，可用环境变量 `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD` 覆盖）。
 
 ## 功能模块
 
