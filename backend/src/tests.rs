@@ -567,7 +567,7 @@ fn verify_password_accepts_hash_with_cheaper_params() {
     // 默认参数哈希依旧可用(与 Argon2::default() 参数一致)
     let salt2 = SaltString::generate(&mut OsRng);
     let h2 = Argon2::default().hash_password(b"pw", &salt2).unwrap();
-    assert!(auth::verify_password("pw", &h2.to_string().as_str()));
+    assert!(auth::verify_password("pw", h2.to_string().as_str()));
 }
 
 #[test]

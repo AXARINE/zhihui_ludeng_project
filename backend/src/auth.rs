@@ -639,10 +639,10 @@ async fn update_user(
         return Err(Error::NotFound(format!("账号 {id} 不存在")));
     }
     // 如果要改密码，验证长度
-    if let Some(pwd) = &body.password {
-        if pwd.len() < 6 || pwd.len() > 64 {
-            return Err(Error::BadRequest("密码长度需在 6~64 之间".into()));
-        }
+    if let Some(pwd) = &body.password
+        && (pwd.len() < 6 || pwd.len() > 64)
+    {
+        return Err(Error::BadRequest("密码长度需在 6~64 之间".into()));
     }
     // 如果要改用户名，验证长度和唯一性
     if let Some(uname) = &body.username {
