@@ -35,6 +35,12 @@ services:
     env_file: .env # HUAWEI_AK/SK、HUAWEI_PROJECT_ID、HUAWEI_IOTDA_ENDPOINT/REGION
     environment:
       DATABASE_URL: postgres://streetlight:streetlight@postgres:5432/streetlight
+      # 压测/联调:true 时北向调用本地短路(不发真实华为云请求),默认关闭
+      IOTHUB_DRY_RUN: "${IOTHUB_DRY_RUN:-false}"
+      # 性能参数(见 README 8.6 与 perf/ 压测报告):均有安全默认值
+      DATABASE_POOL_SIZE: "${DATABASE_POOL_SIZE:-20}"
+      ARGON2_MAX_CONCURRENCY: "${ARGON2_MAX_CONCURRENCY:-32}"
+      LOGIN_RATE_LIMIT_PER_MIN: "${LOGIN_RATE_LIMIT_PER_MIN:-30}"
     ports:
       - "8080:8080"
     depends_on:

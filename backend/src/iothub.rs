@@ -81,6 +81,9 @@ pub struct IothubClient {
     creds: Credentials,
     project_id: String,
     http: reqwest::Client,
+    /// 压测/联调模式(`IOTHUB_DRY_RUN=true`):所有北向操作本地短路,不发任何真实请求。
+    /// 命令/阈值下发直接返回成功,影子返回空,设备状态固定 Online(不产生离线告警)。
+    dry_run: bool,
 }
 
 /// Light 服务上报的属性(产品模型:`Luminance` int + `LightStatus` string)
@@ -194,6 +197,10 @@ impl IothubClient {
                 .build()?,
             creds: Credentials::new(ak, sk, region, endpoint),
             project_id,
+            dry_run: matches!(
+                env_var("IOTHUB_DRY_RUN").as_deref(),
+                Some("1" | "true" | "TRUE" | "yes" | "on")
+            ),
         })))
     }
 
@@ -260,8 +267,7 @@ impl IothubClient {
                 raw.as_deref().unwrap_or_default(),
             );
             let url = format!("https://{}{}", self.host(), self.path_of(path));
-            let req =
-                self.http.request(method.clone(), url).headers(headers);
+            let req = self.http.request(method.clone(), url).headers(headers);
             let req = match &raw {
                 Some(raw) => req.body(raw.clone()),
                 None => req,
@@ -294,6 +300,10 @@ impl IothubClient {
         &self,
         device_id: &str,
     ) -> anyhow::Result<Option<ShadowProps>> {
+        if self.dry_run {
+            tracing::debug!("dry-run: shadow({device_id}) stubbed");
+            return Ok(None);
+        }
         let resp = self
             .request(
                 reqwest::Method::GET,
@@ -315,6 +325,10 @@ impl IothubClient {
         &self,
         device_id: &str,
     ) -> anyhow::Result<OnlineStatus> {
+        if self.dry_run {
+            tracing::debug!("dry-run: device_status({device_id}) stubbed");
+            return Ok(OnlineStatus::Online);
+        }
         let resp = self
             .request(
                 reqwest::Method::GET,
@@ -331,6 +345,13 @@ impl IothubClient {
         device_id: &str,
         action: LampAction,
     ) -> anyhow::Result<()> {
+        if self.dry_run {
+            tracing::debug!(
+                "dry-run: control_led({device_id}, {}) stubbed",
+                action.as_iotda_str()
+            );
+            return Ok(());
+        }
         let body = serde_json::json!({
             "service_id": "Light",
             "command_name": "Light_Control_Led",
@@ -351,6 +372,12 @@ impl IothubClient {
         device_id: &str,
         threshold: i32,
     ) -> anyhow::Result<()> {
+        if self.dry_run {
+            tracing::debug!(
+                "dry-run: set_threshold({device_id}, {threshold}) stubbed"
+            );
+            return Ok(());
+        }
         let body = serde_json::json!({
             "services": [{
                 "service_id": "Light",
@@ -426,8 +453,7 @@ pub async fn run(state: AppState, iothub: Arc<IothubClient>) {
         .filter(|&s| s > 0)
         .unwrap_or(8);
     tracing::info!("iothub poll interval: {interval_secs}s");
-    let mut ticker =
-        tokio::time::interval(Duration::from_secs(interval_secs));
+    let mut ticker = tokio::time::interval(Duration::from_secs(interval_secs));
     // 单轮轮询超时(如设备多/网络慢)时顺延而不是补打,避免请求叠加
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
