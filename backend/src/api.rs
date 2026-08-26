@@ -9,7 +9,6 @@ use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::fmt;
-use std::sync::Arc;
 use utoipa::ToSchema;
 
 /// API 统一错误:`IntoResponse` 映射为 (status, message),handler 全程 `?` 组合
@@ -54,7 +53,7 @@ impl IntoResponse for Error {
 }
 
 /// 灯控动作:serde 按小写反序列化(on/off/auto),非法值由 axum 直接拒收
-#[derive(Debug, Clone, Copy, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]
 pub enum LampAction {
     On,
@@ -84,14 +83,78 @@ impl fmt::Display for LampAction {
     }
 }
 
+/// 从 DB 文本还原(`command_record.action` 只由本后端写入,非法值视为数据损坏)
+impl TryFrom<String> for LampAction {
+    type Error = String;
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        match s.as_str() {
+            "on" => Ok(Self::On),
+            "off" => Ok(Self::Off),
+            "auto" => Ok(Self::Auto),
+            _ => Err(format!("非法灯控动作: {s}")),
+        }
+    }
+}
+
+// ---- 设备/指令表的封闭取值枚举:serde 小写(对外 JSON 与原字符串逐字节一致),
+// ---- sqlx 经 `try_from = "String"` 解码;DB 里出现未知值时兜底 Unknown,不让查询失败
+macro_rules! text_enum {
+    ($(#[$meta:meta])* $name:ident { $($variant:ident => $text:literal),+ $(,)? }) => {
+        $(#[$meta])*
+        #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+        #[serde(rename_all = "lowercase")]
+        pub enum $name {
+            $($variant),+,
+            #[serde(other)]
+            Unknown,
+        }
+
+        // sqlx `try_from` 属性要求 TryFrom;未知值兜底 Unknown,永不失败
+        #[allow(clippy::infallible_try_from)]
+        impl TryFrom<String> for $name {
+            type Error = std::convert::Infallible;
+            fn try_from(s: String) -> Result<Self, Self::Error> {
+                Ok(match s.as_str() {
+                    $($text => Self::$variant,)+
+                    _ => Self::Unknown,
+                })
+            }
+        }
+    };
+}
+
+text_enum! {
+    /// 设备在线状态(`device.status`,由轮询器写入 online/offline)
+    DeviceStatus { Online => "online", Offline => "offline" }
+}
+text_enum! {
+    /// 灯态(`device.lamp`,影子 `LightStatus` 小写化)
+    LampState { On => "on", Off => "off" }
+}
+text_enum! {
+    /// 控制模式(`device.mode`)
+    ControlMode { Auto => "auto", Manual => "manual" }
+}
+text_enum! {
+    /// 指令来源(`command_record.source`)
+    CommandSource { Manual => "manual", Auto => "auto" }
+}
+text_enum! {
+    /// 指令状态(`command_record.status`:北向是否受理)
+    CommandStatus { Sent => "sent", Failed => "failed" }
+}
+
 #[derive(Serialize, ToSchema, sqlx::FromRow)]
 pub struct Device {
     pub id: String,
     pub name: String,
     pub location: String,
-    pub status: String,
-    pub lamp: String,
-    pub mode: String,
+    #[sqlx(try_from = "String")]
+    pub status: DeviceStatus,
+    #[sqlx(try_from = "String")]
+    pub lamp: LampState,
+    #[sqlx(try_from = "String")]
+    pub mode: ControlMode,
     pub last_seen_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
 }
@@ -118,9 +181,12 @@ pub struct Alarm {
 pub struct CommandRecord {
     pub id: i64,
     pub device_id: String,
-    pub action: String,
-    pub source: String,
-    pub status: String,
+    #[sqlx(try_from = "String")]
+    pub action: LampAction,
+    #[sqlx(try_from = "String")]
+    pub source: CommandSource,
+    #[sqlx(try_from = "String")]
+    pub status: CommandStatus,
     pub message: String,
     pub created_at: DateTime<Utc>,
 }
@@ -270,7 +336,7 @@ struct CommandCounts {
     auto_24h: i64,
 }
 
-pub fn router(state: Arc<AppState>) -> Router {
+pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/health", get(health))
         .route("/api/devices", get(list_devices).post(create_device))
@@ -293,8 +359,6 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/api/commands", get(list_global_commands))
         .route("/api/dashboard", get(dashboard))
         .route("/api/assistant/ask", post(assistant_ask))
-        // 允许前端页面跨域访问(开发期放开,上线前按需收紧)
-        .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(state)
 }
 
@@ -308,6 +372,20 @@ pub fn parse_ts(param: &str, raw: &str) -> Result<DateTime<Utc>, Error> {
         })
 }
 
+/// 解析后的时间区间(from, to;任一侧可缺省)
+pub type TimeRange = (Option<DateTime<Utc>>, Option<DateTime<Utc>>);
+
+/// 解析查询参数里的 from/to 时间区间(任一侧可缺省)
+pub fn parse_time_range(
+    from: Option<&str>,
+    to: Option<&str>,
+) -> Result<TimeRange, Error> {
+    Ok((
+        from.map(|v| parse_ts("from", v)).transpose()?,
+        to.map(|v| parse_ts("to", v)).transpose()?,
+    ))
+}
+
 pub fn clamp_limit(limit: Option<i64>, default: i64, max: i64) -> i64 {
     limit.unwrap_or(default).clamp(1, max)
 }
@@ -319,7 +397,7 @@ pub fn clamp_limit(limit: Option<i64>, default: i64, max: i64) -> i64 {
     responses((status = 200, description = "服务与数据库状态"))
 )]
 async fn health(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
 ) -> Result<Json<serde_json::Value>, Error> {
     sqlx::query_scalar::<_, i32>("SELECT 1")
         .fetch_one(&s.db)
@@ -337,10 +415,10 @@ async fn health(
     security(("bearer_auth" = []))
 )]
 async fn list_devices(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
 ) -> Result<Json<Vec<Device>>, Error> {
-    auth.require(&s.db, "device:status").await?;
+    auth.require(&s, "device:status").await?;
     let rows = sqlx::query_as::<_, Device>(
         "SELECT id, name, location, status, lamp, mode, last_seen_at, created_at \
          FROM device ORDER BY created_at",
@@ -362,22 +440,24 @@ async fn list_devices(
     security(("bearer_auth" = []))
 )]
 async fn create_device(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
     Json(body): Json<CreateDevice>,
 ) -> Result<StatusCode, Error> {
-    auth.require(&s.db, "device:manage").await?;
+    auth.require(&s, "device:manage").await?;
     let id = body.id.trim().to_string();
     if id.is_empty() || id.len() > 64 {
         return Err(Error::BadRequest("device id 长度需在 1~64 之间".into()));
     }
+    let name = body.name.as_deref().unwrap_or(&id).trim();
+    let location = body.location.as_deref().unwrap_or_default().trim();
     sqlx::query(
         "INSERT INTO device (id, name, location) VALUES ($1, $2, $3) \
          ON CONFLICT (id) DO NOTHING",
     )
     .bind(&id)
-    .bind(body.name.unwrap_or_else(|| id.clone()).trim())
-    .bind(body.location.unwrap_or_default().trim())
+    .bind(name)
+    .bind(location)
     .execute(&s.db)
     .await?;
     Ok(StatusCode::CREATED)
@@ -397,12 +477,12 @@ async fn create_device(
     security(("bearer_auth" = []))
 )]
 async fn update_device(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
     Path(id): Path<String>,
     Json(body): Json<UpdateDevice>,
 ) -> Result<Json<Device>, Error> {
-    auth.require(&s.db, "device:manage").await?;
+    auth.require(&s, "device:manage").await?;
     let mut qb = sqlx::QueryBuilder::new("UPDATE device SET ");
     let mut changed = false;
     {
@@ -457,25 +537,41 @@ async fn update_device(
     security(("bearer_auth" = []))
 )]
 async fn delete_device(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
     Path(id): Path<String>,
 ) -> Result<StatusCode, Error> {
-    auth.require(&s.db, "device:manage").await?;
+    auth.require(&s, "device:manage").await?;
     // 静态 SQL 白名单(sqlx 0.9 起 query() 要求 SqlSafeStr,拒收动态 String)
-    futures::future::try_join_all(
-        [
-            "DELETE FROM device WHERE id = $1",
-            "DELETE FROM config WHERE device_id = $1",
-            "DELETE FROM lux_record WHERE device_id = $1",
-            "DELETE FROM alarm WHERE device_id = $1",
-            "DELETE FROM command_record WHERE device_id = $1",
-        ]
-        .into_iter()
-        .map(|sql| sqlx::query(sql).bind(&id).execute(&s.db)),
-    )
-    .await?;
+    // 单事务执行:并发连接池上逐条 execute 中途失败会留下孤儿数据
+    let mut tx = s.db.begin().await?;
+    for sql in [
+        "DELETE FROM device WHERE id = $1",
+        "DELETE FROM config WHERE device_id = $1",
+        "DELETE FROM lux_record WHERE device_id = $1",
+        "DELETE FROM alarm WHERE device_id = $1",
+        "DELETE FROM command_record WHERE device_id = $1",
+    ] {
+        sqlx::query(sql).bind(&id).execute(&mut *tx).await?;
+    }
+    tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// 给 `lux_record` 查询追加统一的 WHERE 条件(`device_id` + 可选时间区间)
+fn push_lux_filters(
+    qb: &mut sqlx::QueryBuilder<sqlx::Postgres>,
+    id: &str,
+    from: Option<DateTime<Utc>>,
+    to: Option<DateTime<Utc>>,
+) {
+    qb.push_bind(id);
+    if let Some(from) = from {
+        qb.push(" AND created_at >= ").push_bind(from);
+    }
+    if let Some(to) = to {
+        qb.push(" AND created_at <= ").push_bind(to);
+    }
 }
 
 // ---------------- 光照 ----------------
@@ -487,11 +583,11 @@ async fn delete_device(
     security(("bearer_auth" = []))
 )]
 async fn lux_latest(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
     Path(id): Path<String>,
 ) -> Result<Json<Option<LuxRecord>>, Error> {
-    auth.require(&s.db, "luminance:monitor").await?;
+    auth.require(&s, "luminance:monitor").await?;
     let row = sqlx::query_as::<_, LuxRecord>(
         "SELECT id, device_id, lux, created_at FROM lux_record \
          WHERE device_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1",
@@ -514,24 +610,17 @@ async fn lux_latest(
     security(("bearer_auth" = []))
 )]
 async fn lux_history(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
     Path(id): Path<String>,
     Query(q): Query<HistoryQuery>,
 ) -> Result<Json<Vec<LuxRecord>>, Error> {
-    auth.require(&s.db, "luminance:history").await?;
-    let from = q.from.as_deref().map(|v| parse_ts("from", v)).transpose()?;
-    let to = q.to.as_deref().map(|v| parse_ts("to", v)).transpose()?;
+    auth.require(&s, "luminance:history").await?;
+    let (from, to) = parse_time_range(q.from.as_deref(), q.to.as_deref())?;
     let mut qb = sqlx::QueryBuilder::new(
         "SELECT id, device_id, lux, created_at FROM lux_record WHERE device_id = ",
     );
-    qb.push_bind(&id);
-    if let Some(from) = from {
-        qb.push(" AND created_at >= ").push_bind(from);
-    }
-    if let Some(to) = to {
-        qb.push(" AND created_at <= ").push_bind(to);
-    }
+    push_lux_filters(&mut qb, &id, from, to);
     qb.push(" ORDER BY created_at DESC, id DESC LIMIT 5000");
     let rows = qb.build_query_as::<LuxRecord>().fetch_all(&s.db).await?;
     Ok(Json(rows))
@@ -549,44 +638,34 @@ async fn lux_history(
     security(("bearer_auth" = []))
 )]
 async fn lux_stats(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
     Path(id): Path<String>,
     Query(q): Query<HistoryQuery>,
 ) -> Result<Json<LuxStats>, Error> {
-    auth.require(&s.db, "luminance:history").await?;
-    let from = q.from.as_deref().map(|v| parse_ts("from", v)).transpose()?;
-    let to = q.to.as_deref().map(|v| parse_ts("to", v)).transpose()?;
+    auth.require(&s, "luminance:history").await?;
+    let (from, to) = parse_time_range(q.from.as_deref(), q.to.as_deref())?;
 
-    let mut qb = sqlx::QueryBuilder::new(
+    let mut agg_qb = sqlx::QueryBuilder::new(
         "SELECT COUNT(*)::bigint AS count, MIN(lux)::int AS min, \
                 MAX(lux)::int AS max, AVG(lux)::float8 AS avg \
          FROM lux_record WHERE device_id = ",
     );
-    qb.push_bind(&id);
-    if let Some(from) = from {
-        qb.push(" AND created_at >= ").push_bind(from);
-    }
-    if let Some(to) = to {
-        qb.push(" AND created_at <= ").push_bind(to);
-    }
-    let agg = qb.build_query_as::<LuxAgg>().fetch_one(&s.db).await?;
+    push_lux_filters(&mut agg_qb, &id, from, to);
 
-    let mut qb = sqlx::QueryBuilder::new(
+    let mut latest_qb = sqlx::QueryBuilder::new(
         "SELECT id, device_id, lux, created_at FROM lux_record WHERE device_id = ",
     );
-    qb.push_bind(&id);
-    if let Some(from) = from {
-        qb.push(" AND created_at >= ").push_bind(from);
-    }
-    if let Some(to) = to {
-        qb.push(" AND created_at <= ").push_bind(to);
-    }
-    qb.push(" ORDER BY created_at DESC, id DESC LIMIT 1");
-    let latest = qb
-        .build_query_as::<LuxRecord>()
-        .fetch_optional(&s.db)
-        .await?;
+    push_lux_filters(&mut latest_qb, &id, from, to);
+    latest_qb.push(" ORDER BY created_at DESC, id DESC LIMIT 1");
+
+    // 聚合与最新值互不依赖,并发执行
+    let (agg, latest) = tokio::try_join!(
+        agg_qb.build_query_as::<LuxAgg>().fetch_one(&s.db),
+        latest_qb
+            .build_query_as::<LuxRecord>()
+            .fetch_optional(&s.db),
+    )?;
 
     Ok(Json(LuxStats {
         device_id: id,
@@ -607,10 +686,10 @@ async fn lux_stats(
     security(("bearer_auth" = []))
 )]
 async fn global_lux_latest(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
 ) -> Result<Json<Vec<DeviceLuxLatest>>, Error> {
-    auth.require(&s.db, "luminance:monitor").await?;
+    auth.require(&s, "luminance:monitor").await?;
     let rows = sqlx::query_as::<_, DeviceLuxLatest>(
         "SELECT d.id AS device_id, l.id, l.lux, l.created_at \
          FROM device d \
@@ -640,12 +719,12 @@ async fn global_lux_latest(
     security(("bearer_auth" = []))
 )]
 async fn set_lamp(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
     Path(id): Path<String>,
     Json(body): Json<LampBody>,
 ) -> Result<StatusCode, Error> {
-    auth.require(&s.db, "control:manual").await?;
+    auth.require(&s, "control:manual").await?;
     let hub = s.iothub.as_ref().ok_or(Error::IothubUnavailable)?;
     // 指令留痕:北向接受记 sent,失败记 failed(固件执行结果不回传,无法追踪)
     let result = hub.control_led(&id, body.action).await;
@@ -675,11 +754,11 @@ async fn set_lamp(
     security(("bearer_auth" = []))
 )]
 async fn get_threshold(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
     Path(id): Path<String>,
 ) -> Result<Json<ThresholdResponse>, Error> {
-    auth.require(&s.db, "config:threshold").await?;
+    auth.require(&s, "config:threshold").await?;
     let threshold = sqlx::query_scalar::<_, i32>(
         "SELECT threshold FROM config WHERE device_id = $1",
     )
@@ -708,12 +787,12 @@ async fn get_threshold(
     security(("bearer_auth" = []))
 )]
 async fn put_threshold(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
     Path(id): Path<String>,
     Json(body): Json<ThresholdBody>,
 ) -> Result<StatusCode, Error> {
-    auth.require(&s.db, "config:threshold").await?;
+    auth.require(&s, "config:threshold").await?;
     if !(0..=10_000).contains(&body.threshold) {
         return Err(Error::BadRequest("threshold 需在 0~10000 之间".into()));
     }
@@ -744,12 +823,12 @@ async fn put_threshold(
     security(("bearer_auth" = []))
 )]
 async fn list_device_commands(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
     Path(id): Path<String>,
     Query(q): Query<CommandQuery>,
 ) -> Result<Json<Vec<CommandRecord>>, Error> {
-    auth.require(&s.db, "command:log").await?;
+    auth.require(&s, "command:log").await?;
     let rows = query_commands(&s.db, Some(&id), &q).await?;
     Ok(Json(rows))
 }
@@ -767,11 +846,11 @@ async fn list_device_commands(
     security(("bearer_auth" = []))
 )]
 async fn list_global_commands(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
     Query(q): Query<CommandQuery>,
 ) -> Result<Json<Vec<CommandRecord>>, Error> {
-    auth.require(&s.db, "command:log").await?;
+    auth.require(&s, "command:log").await?;
     let rows = query_commands(&s.db, None, &q).await?;
     Ok(Json(rows))
 }
@@ -781,16 +860,14 @@ async fn query_commands(
     device_id: Option<&str>,
     q: &CommandQuery,
 ) -> Result<Vec<CommandRecord>, Error> {
-    let from = q.from.as_deref().map(|v| parse_ts("from", v)).transpose()?;
-    let to = q.to.as_deref().map(|v| parse_ts("to", v)).transpose()?;
+    let (from, to) = parse_time_range(q.from.as_deref(), q.to.as_deref())?;
     let limit = clamp_limit(q.limit, 500, 5000);
     let mut qb = sqlx::QueryBuilder::new(
         "SELECT id, device_id, action, source, status, message, created_at \
          FROM command_record WHERE 1=1",
     );
-    if let Some(id) = device_id {
-        qb.push(" AND device_id = ").push_bind(id);
-    } else if let Some(id) = q.device_id.as_deref() {
+    // 路径参数优先于查询参数
+    if let Some(id) = device_id.or(q.device_id.as_deref()) {
         qb.push(" AND device_id = ").push_bind(id);
     }
     if let Some(from) = from {
@@ -820,13 +897,12 @@ async fn query_commands(
     security(("bearer_auth" = []))
 )]
 async fn list_alarms(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
     Query(q): Query<AlarmQuery>,
 ) -> Result<Json<Vec<Alarm>>, Error> {
-    auth.require(&s.db, "alarm:log").await?;
-    let from = q.from.as_deref().map(|v| parse_ts("from", v)).transpose()?;
-    let to = q.to.as_deref().map(|v| parse_ts("to", v)).transpose()?;
+    auth.require(&s, "alarm:log").await?;
+    let (from, to) = parse_time_range(q.from.as_deref(), q.to.as_deref())?;
     let limit = clamp_limit(q.limit, 500, 5000);
     let mut qb = sqlx::QueryBuilder::new(
         "SELECT id, device_id, type, message, created_at, resolved_at FROM alarm WHERE 1=1",
@@ -869,12 +945,12 @@ async fn list_alarms(
     security(("bearer_auth" = []))
 )]
 async fn patch_alarm(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
     Path(id): Path<i64>,
     Json(body): Json<AlarmPatch>,
 ) -> Result<Json<Alarm>, Error> {
-    auth.require(&s.db, "alarm:log").await?;
+    auth.require(&s, "alarm:log").await?;
     let row = if body.resolved {
         sqlx::query_as::<_, Alarm>(
             "UPDATE alarm SET resolved_at = COALESCE(resolved_at, now()) WHERE id = $1 \
@@ -901,38 +977,37 @@ async fn patch_alarm(
     security(("bearer_auth" = []))
 )]
 async fn dashboard(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
 ) -> Result<Json<Dashboard>, Error> {
-    auth.require(&s.db, "device:status").await?;
-    let devices = sqlx::query_as::<_, DeviceCounts>(
-        "SELECT COUNT(*)::bigint AS total, \
-                COUNT(*) FILTER (WHERE status = 'online')::bigint AS online, \
-                COUNT(*) FILTER (WHERE lamp = 'on')::bigint AS lamp_on \
-         FROM device",
-    )
-    .fetch_one(&s.db)
-    .await?;
-    let alarms = sqlx::query_as::<_, AlarmCounts>(
-        "SELECT COUNT(*) FILTER (WHERE resolved_at IS NULL)::bigint AS open, \
-                COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours')::bigint AS last_24h \
-         FROM alarm",
-    )
-    .fetch_one(&s.db)
-    .await?;
-    let lux = sqlx::query_as::<_, LuxCounts>(
-        "SELECT COUNT(*)::bigint AS reports_24h, AVG(lux)::float8 AS avg_lux_24h \
-         FROM lux_record WHERE created_at >= now() - interval '24 hours'",
-    )
-    .fetch_one(&s.db)
-    .await?;
-    let commands = sqlx::query_as::<_, CommandCounts>(
-        "SELECT COUNT(*) FILTER (WHERE source = 'manual')::bigint AS manual_24h, \
-                COUNT(*) FILTER (WHERE source = 'auto')::bigint AS auto_24h \
-         FROM command_record WHERE created_at >= now() - interval '24 hours'",
-    )
-    .fetch_one(&s.db)
-    .await?;
+    auth.require(&s, "device:status").await?;
+    // 四类聚合并发执行(池上限 5 连接,恰好够用)
+    let (devices, alarms, lux, commands) = tokio::try_join!(
+        sqlx::query_as::<_, DeviceCounts>(
+            "SELECT COUNT(*)::bigint AS total, \
+                    COUNT(*) FILTER (WHERE status = 'online')::bigint AS online, \
+                    COUNT(*) FILTER (WHERE lamp = 'on')::bigint AS lamp_on \
+             FROM device",
+        )
+        .fetch_one(&s.db),
+        sqlx::query_as::<_, AlarmCounts>(
+            "SELECT COUNT(*) FILTER (WHERE resolved_at IS NULL)::bigint AS open, \
+                    COUNT(*) FILTER (WHERE created_at >= now() - interval '24 hours')::bigint AS last_24h \
+             FROM alarm",
+        )
+        .fetch_one(&s.db),
+        sqlx::query_as::<_, LuxCounts>(
+            "SELECT COUNT(*)::bigint AS reports_24h, AVG(lux)::float8 AS avg_lux_24h \
+             FROM lux_record WHERE created_at >= now() - interval '24 hours'",
+        )
+        .fetch_one(&s.db),
+        sqlx::query_as::<_, CommandCounts>(
+            "SELECT COUNT(*) FILTER (WHERE source = 'manual')::bigint AS manual_24h, \
+                    COUNT(*) FILTER (WHERE source = 'auto')::bigint AS auto_24h \
+             FROM command_record WHERE created_at >= now() - interval '24 hours'",
+        )
+        .fetch_one(&s.db),
+    )?;
     Ok(Json(Dashboard {
         devices: DashboardDevices {
             total: devices.total,
@@ -976,11 +1051,11 @@ struct AssistantAnswer {
     security(("bearer_auth" = []))
 )]
 async fn assistant_ask(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
     Json(body): Json<AssistantAskIn>,
 ) -> Result<Json<AssistantAnswer>, Error> {
-    auth.require(&s.db, "assistant:qa").await?;
+    auth.require(&s, "assistant:qa").await?;
     let answer = assistant::answer(&s.db, &body.question).await?;
     Ok(Json(AssistantAnswer { answer }))
 }

@@ -159,7 +159,7 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 - 密码使用 **Argon2id** 哈希（随机盐），数据库中只存哈希串。
 - 登录成功后签发 **HS256 JWT**，有效期 24 小时，`Claims` 含 `user_id / username / role_id / role_code / exp`。
 - 全局中间件 `auth_middleware` 只做“你是谁”（认证）：除公开路径外，要求请求头 `Authorization: Bearer <token>`；校验通过后把 `Auth { user_id, role_id, role_code }` 塞进 request extensions。
-- handler 通过 `Auth` extractor 取出身份，再调用 `auth.require(&db, "权限码")` 做“你能不能做”（授权）。权限映射每次实时查库，因此用 `super_admin` 在 Swagger 里改了角色权限后**立即生效，无需重启**。
+- handler 通过 `Auth` extractor 取出身份，再调用 `auth.require(&state, "权限码")` 做“你能不能做”（授权）。权限码校验走进程内缓存 `perm_cache`（按 `role_id` 缓存权限码集合，命中免查库），`PUT /api/roles/{id}/permissions` 提交后失效对应条目，因此用 `super_admin` 在 Swagger 里改了角色权限后**立即生效，无需重启**（单实例前提；多副本部署时外部直接改库不会触发失效，需改 TTL/广播方案）。
 
 公开路径（无需 token）：
 
@@ -205,7 +205,7 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 - 当前 token **无服务端吊销机制**：删除或禁用账号后，已签发的 token 在 24 小时有效期内仍能通过中间件访问其他接口；其中账号被删除后 `/api/auth/me` 会因查不到账号返回 401，禁用账号不会触发该检查。需要严格吊销时，应增加黑名单/版本号机制或缩短 TTL。
 - 引导账号按角色分别判断：`BOOTSTRAP_SUPER_ADMIN_*` / `BOOTSTRAP_ADMIN_*` 只在对应角色**没有任何账号**时生效；生产首次启动后请删除或修改默认账号。
 - 防权限锁死：`super_admin` 的权限映射被接口硬保护（403 拒绝修改）；拥有 `role:manage` 的角色修改**自己**的权限时，必须保留 `role:manage`，否则同样 403。
-- CORS 当前为开发期全放开（`CorsLayer` Any + 业务路由 permissive），上线前应收紧为前端实际域名。
+- CORS 当前为开发期全放开（`CorsLayer` Any，只在 `main.rs` 装配一处，业务 router 不再各自加层），上线前应收紧为前端实际域名。
 
 ---
 
@@ -306,7 +306,8 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 { "permission_ids": [1, 2, 3, 4, 5, 6, 7, 9, 11] }
 ```
 
-- 所有 `permission_ids` 必须真实存在，否则 400；更新在单个事务中完成。
+- 所有 `permission_ids` 必须真实存在，否则 400；更新在单个事务中完成，映射写入用 `unnest($2::bigint[])` 批量插入（避免 N 次 roundtrip）。
+- 提交成功后同步失效该角色的 `perm_cache` 条目，下一请求重新加载新映射。
 - `super_admin` 角色的权限映射**固定**，对其 PUT 返回 403。
 - 修改“自己当前角色”时，提交的权限 ID 里必须保留 `role:manage`，否则 403（防止把自己锁在权限管理之外）。
 
@@ -325,7 +326,7 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 
 **PATCH /api/devices/{id}**：`name`、`location` 至少提供一个非空值，动态 SQL 只更新传入字段。
 
-**DELETE /api/devices/{id}**：并发删除 `device / config / lux_record / alarm / command_record` 五张表里的关联数据；只要删除语句执行成功就返回 204（不校验设备是否存在）。
+**DELETE /api/devices/{id}**：在**单个事务**内删除 `device / config / lux_record / alarm / command_record` 五张表里的关联数据（任一步失败整体回滚，不留孤儿数据）；事务提交成功返回 204（不校验设备是否存在）。
 
 设备对象结构：
 
@@ -430,7 +431,7 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 
 **GET /api/dashboard**
 
-一次返回四组聚合（`AVG` 均四舍五入 1 位小数）：
+一次返回四组聚合（`AVG` 均四舍五入 1 位小数）；四类查询互不依赖，用 `tokio::try_join!` 并发执行（连接池上限 5，恰好够用）：
 
 ```jsonc
 {
@@ -495,15 +496,16 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 → 连接 PostgreSQL（默认本地 streetlight/streetlight，连接池上限 5）
 → 自动执行 migrations
 → bootstrap_admin：按角色补建引导账号（super_admin / admin 各缺账号才创建）
+→ 初始化角色权限缓存 perm_cache（空表，首次 require 时惰性加载）
 → 读取 JWT_SECRET（未设置则警告并用开发默认值）
 → IothubClient::from_env()：HUAWEI_* 齐全才启用，否则北向功能停用
 → 若启用：spawn 8 秒轮询任务
 → 组装 Router = api::router + auth::router + SwaggerUi(/docs)
-→ 全局 auth_middleware → CORS 层
+→ 全局 auth_middleware → CORS 层（main.rs 统一装配，业务 router 内不再各自加层）
 → 监听 0.0.0.0:8080
 ```
 
-`AppState` 为 `Arc<AppState>`，包含 `db: PgPool`、`iothub: Option<Arc<IothubClient>>`、`jwt_secret: Arc<str>`，各模块 router 通过 `with_state` 共享。
+`AppState` 是 `#[derive(Clone)]` 的普通结构体（`PgPool` / `Arc` 内部共享，按值克隆开销可忽略），包含 `db: PgPool`、`iothub: Option<Arc<IothubClient>>`、`jwt_secret: Arc<str>`、`perm_cache: PermCache`（`Arc<RwLock<HashMap<i64, Arc<HashSet<String>>>>>`，角色权限缓存）；各模块 `router(state: AppState)` 直接按值接收 `with_state`，不再套一层 `Arc<AppState>`。
 
 ### 7.2 一次请求的生命周期
 
@@ -514,9 +516,9 @@ HTTP 请求
     · 公开路径？直接放行
     · 否则解析 Authorization: Bearer <token>
     · HS256 验签 + exp 校验 → 把 Auth 塞进 extensions
-→ handler extractor：State<Arc<AppState>> + Auth + Path/Query/Json
+→ handler extractor：State<AppState> + Auth + Path/Query/Json
 → 参数反序列化（axum 自动 400）
-→ auth.require(&db, "权限码")：实时查 role_permission，无权限 403
+→ auth.require(&state, "权限码")：先查 perm_cache，未命中查 role_permission 并回填缓存，无权限 403
 → 业务逻辑：QueryBuilder 查库 / reqwest 调 IoTDA
 → 所有可恢复错误以 `?` 上抛为 api::Error
 → Error::into_response() 映射为 (HTTP 状态, 中文错误消息)
@@ -538,6 +540,8 @@ string_to_sign = "V11-HMAC-SHA256\n{sdk_date}\n{info}\n{sha256(canonical_request
 
 两个易错点（`tests.rs` 用 KAT 锁死防回归）：规范 URI 必须以 `/` 结尾；canonical headers 块与 `SignedHeaders` 之间多一个空行。
 
+签名凭据统一打包在 `Credentials { ak, sk, region, host }`，`sign_derived(&creds, method, uri, sdk_date, body)` 一次取齐四个字段；`sk` 用 `SecretKey` 新类型包装（`Debug`/`Display` 固定输出 `***` 打码），防止日志或错误消息意外泄露设备密钥。
+
 **北向调用**：
 
 | 后端方法 | IoTDA 接口 | 用途 |
@@ -556,7 +560,7 @@ string_to_sign = "V11-HMAC-SHA256\n{sdk_date}\n{info}\n{sha256(canonical_request
 ```
 每 8s：
   SELECT id FROM device
-  → 对每台设备并发执行 poll_device（无并发上限）：
+  → 对每台设备并发执行 poll_device（`for_each_concurrent(8)`，并发上限 8，避免设备多时同时打出几十个 HTTPS 请求）：
       1. device_status：在线？
       2. UPDATE device.status；状态发生变化时：
          在线 → 自动消解该设备未处理的 offline 告警
@@ -586,6 +590,8 @@ question
 → 模板拼装中文回答（最多展示 5 条告警、10 条指令）
 ```
 
+实现细节：查询行用 `sqlx::FromRow` 结构体按列名映射（`AlarmRow`/`DeviceRow`/`CommandRow`/`LuxAggRow`/`ThresholdRow`/`KnowledgeRow`）；时间窗与设备号正则用 `LazyLock<Regex>` 静态编译一次、进程内复用；知识库检索由 `find_advice` 统一承担（告警文本与提问共用）。
+
 ### 7.6 OpenAPI 文档
 
 - 规范要求所有对外 handler 都用 `#[utoipa::path]` 标注路径、参数、请求体、响应与安全方案（当前仅 `GET /api/roles/{id}/permissions` 是历史遗漏，见 5.2）。
@@ -601,9 +607,9 @@ question
 以新增“设备信息详情”为例，完整动作如下：
 
 1. **定义模型**：请求体 `Deserialize`，响应体 `Serialize + ToSchema`；字段名保持 JSON 小写下划线风格。
-2. **写 handler**：签名使用 `State<Arc<AppState>>`、`Auth`（受保护接口）、`Path/Query/Json` 提取器；返回 `Result<..., api::Error>`，全链路 `?` 传播，不自己 `match` 错误。
+2. **写 handler**：签名使用 `State<AppState>`、`Auth`（受保护接口）、`Path/Query/Json` 提取器；返回 `Result<..., api::Error>`，全链路 `?` 传播，不自己 `match` 错误。
 3. **挂路由**：在所属模块 `router()` 中注册 method + path；路径必须带 `/api` 前缀。
-4. **做授权**：受保护接口在 handler 第一行 `auth.require(&s.db, "权限码").await?`。新权限码需要写迁移插入 `permission` 并给角色授权。
+4. **做授权**：受保护接口在 handler 第一行 `auth.require(&s, "权限码").await?`。新权限码需要写迁移插入 `permission` 并给角色授权。
 5. **写 OpenAPI**：加 `#[utoipa::path]`，并登记进 `openapi.rs` 的 `paths(...)`。
 6. **校验参数**：长度/范围/时间格式在 handler 开头显式校验，错误用 `Error::BadRequest` + 中文消息。
 7. **补测试**：可脱离 DB/网络验证的纯逻辑（解析、serde、状态码、签名、意图分类等）必须补到 `src/tests.rs`。
@@ -614,7 +620,8 @@ question
 - 表名、列名、固定 SQL 片段一律硬编码字符串；**用户输入只允许走 bind 参数**，禁止 `format!` 拼接用户值。
 - 动态条件使用 `sqlx::QueryBuilder`：条件片段 `push(" AND ...")` + 值 `push_bind(...)`，排序/ LIMIT 数值用 `push()`（数值不是用户字符串）。
 - sqlx 0.9 起 `query()` 只接受 `SqlSafeStr`，动态 `String` 会被编译期拒收；若确需动态列/表名，用 `push` 的片段只能是代码内白名单常量。
-- `delete_device` 的设备级联清理采用静态 SQL 白名单数组并发执行；新增设备子表必须补进该数组。
+- DB 封闭取值列（`device.status/lamp/mode`、`command_record.action/source/status`）已用 `api.rs` 的 `text_enum!` 宏枚举化（`DeviceStatus`/`LampState`/`ControlMode`/`CommandSource`/`CommandStatus`）：对外 serde 小写（与库中字符串逐字节一致），sqlx `try_from` 解码，库中出现未知值时兜底 `Unknown`，不让查询整体失败；新增取值只改宏定义一处。
+- `delete_device` 的设备级联清理在**单个事务**内按静态 SQL 白名单顺序执行；新增设备子表必须补进该白名单。
 
 ### 8.3 错误处理
 
@@ -625,7 +632,8 @@ question
 
 ### 8.4 时间与分页工具
 
-- 时间字符串用 `api::parse_ts(param, raw)`：RFC3339 + 统一转 UTC + 中文报错。
+- 时间字符串用 `api::parse_ts(param, raw)`：RFC3339 + 统一转 UTC + 中文报错；多个接口共用的 from/to 区间解析走 `api::parse_time_range(from, to)`。
+- `lux_record` 的 WHERE 拼接（device_id + 可选 from/to）由 `api::push_lux_filters` 统一追加，避免各接口重复拼条件。
 - 列表 limit 用 `api::clamp_limit(limit, default, max)`：默认 500、上限 5000、最小 1，禁止无限量查询。
 
 ### 8.5 代码风格与质量门禁
@@ -638,9 +646,11 @@ cargo test               # 16 个纯逻辑测试，不依赖数据库/网络，�
 cargo build
 ```
 
-- Clippy 全部警告应清零；个别允许的例外必须写 `#[allow(clippy::...)]` 并注释理由（如 `sign_derived` 的 `too_many_arguments`）。
+- Clippy 全部警告应清零；个别允许的例外必须写 `#[allow(clippy::...)]` 并注释理由（目前仅 `text_enum!` 里 `infallible_try_from` 一处）。
 - 公共纯函数标 `#[must_use]` 防止误丢弃结果。
-- 复杂 SQL 行查询用 `type` 别名消解 `clippy::type_complexity`（见 `assistant.rs` 的 `AlarmRow`）。
+- 多列查询行用 `sqlx::FromRow` 结构体按列名映射（见 `assistant.rs` 的 `AlarmRow` 等），不用裸 tuple + “列顺序”注释。
+- Argon2id 哈希/校验必须经 `hash_password_async` / `verify_password_async`（内部 `spawn_blocking`，CPU 密集操作不进 async handler 阻塞 worker）。
+- `dashboard` 与 `lux_stats` 这类多条独立查询用 `tokio::try_join!` 并发执行。
 - 提交前至少通过：`cargo fmt --check`、`cargo clippy --all-targets`、`cargo test`、`cargo build`。
 - 注释/文档：模块头 `//!` 说明职责；踩坑点写“为什么”（如影子只在 ONLINE 时入库、URI 补 `/`），而不是重复代码。
 
@@ -650,7 +660,7 @@ cargo build
 |---|---|---|
 | `DATABASE_URL` | `postgres://streetlight:streetlight@127.0.0.1:5432/streetlight` | 本地默认与 compose 保持一致 |
 | `JWT_SECRET` | `dev-secret-change-me` | 生产必改 |
-| `HUAWEI_AK` / `HUAWEI_SK` | 空 | 华为云访问密钥，缺任一则停用北向 |
+| `HUAWEI_AK` / `HUAWEI_SK` | 空 | 华为云访问密钥，缺任一则停用北向；SK 读入后以 `SecretKey` 包装（打印/日志自动打码） |
 | `HUAWEI_PROJECT_ID` | 空 | 华为云项目 ID |
 | `HUAWEI_IOTDA_ENDPOINT` | 空 | IoTDA 实例**应用侧**域名，如 `xxx.st1.iotda-app.cn-south-1.myhuaweicloud.com` |
 | `HUAWEI_IOTDA_REGION` | 从 endpoint 推断 | 标准版/企业版 V11 衍生签名所需区域 |
@@ -708,7 +718,6 @@ cargo build
 
 - **指令无执行回执**：固件不回传命令执行结果，`command_record.status` 只有 `sent / failed`。
 - **阈值“半成功”**：`PUT /threshold` 先写库再下发；下发失败时本地已更新，接口返回 502。
-- **删除设备非事务**：五张表并发 DELETE，中间某张失败会留下部分数据；重试即可。
 - **JWT 无吊销**：删号/禁用后旧 token 24h 内仍有效（详见 4.3）。
 - **`mode` 字段不实时**：后端没有根据控灯/联动结果回写 `device.mode`，目前仅作信息展示。
 - **GET /api/roles/{id}/permissions 不在 Swagger 文档**：历史遗漏，按 8.1 规范新增接口时应避免同类问题。

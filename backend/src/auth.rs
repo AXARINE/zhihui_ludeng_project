@@ -24,6 +24,7 @@ use jsonwebtoken::{
 };
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use std::collections::HashSet;
 use std::sync::Arc;
 use utoipa::ToSchema;
 
@@ -38,19 +39,46 @@ pub struct Auth {
 }
 
 impl Auth {
-    /// 检查当前角色是否拥有指定权限码(查 `role_permission`,尊重运行时可改的 RBAC 映射)
-    pub async fn require(&self, db: &PgPool, perm: &str) -> Result<(), Error> {
-        let ok: bool = sqlx::query_scalar(
-            "SELECT EXISTS(\
-             SELECT 1 FROM role_permission rp \
-             JOIN permission p ON p.id = rp.permission_id \
-             WHERE rp.role_id = $1 AND p.perm_code = $2)",
-        )
-        .bind(self.role_id)
-        .bind(perm)
-        .fetch_one(db)
-        .await?;
-        if ok {
+    /// 检查当前角色是否拥有指定权限码。
+    ///
+    /// RBAC 映射运行时可改,但变更只经由 `update_role_permissions` 一处,故按 `role_id`
+    /// 做进程内缓存(命中即免一次 SQL;该接口提交后失效对应条目)。前提:单实例部署,
+    /// 多副本时外部直接改库不会触发失效。
+    pub async fn require(
+        &self,
+        state: &AppState,
+        perm: &str,
+    ) -> Result<(), Error> {
+        // 锁内不 await:取到 Arc 即放锁,std::RwLock 不会跨异步点持有
+        let cached = state
+            .perm_cache
+            .read()
+            .expect("perm cache lock poisoned")
+            .get(&self.role_id)
+            .cloned();
+        let perms = if let Some(cached) = cached {
+            cached
+        } else {
+            let fresh: Arc<HashSet<String>> = Arc::new(
+                sqlx::query_scalar::<_, String>(
+                    "SELECT p.perm_code FROM permission p \
+                     JOIN role_permission rp ON rp.permission_id = p.id \
+                     WHERE rp.role_id = $1",
+                )
+                .bind(self.role_id)
+                .fetch_all(&state.db)
+                .await?
+                .into_iter()
+                .collect(),
+            );
+            state
+                .perm_cache
+                .write()
+                .expect("perm cache lock poisoned")
+                .insert(self.role_id, Arc::clone(&fresh));
+            fresh
+        };
+        if perms.contains(perm) {
             Ok(())
         } else {
             Err(Error::Forbidden(format!(
@@ -100,7 +128,7 @@ fn decode_token(
 
 /// 全局认证中间件:非公开路径必须带 `Authorization: Bearer <token>`
 pub async fn auth_middleware(
-    State(state): State<Arc<AppState>>,
+    State(state): State<AppState>,
     mut req: Request,
     next: Next,
 ) -> Response {
@@ -158,8 +186,25 @@ pub fn verify_password(password: &str, hashed: &str) -> bool {
     })
 }
 
+/// 异步包装:Argon2id 是 CPU 密集操作(默认参数约几十至上百毫秒),
+/// 移到阻塞线程池执行,避免卡住 tokio worker 线程
+pub async fn hash_password_async(password: String) -> Result<String, Error> {
+    tokio::task::spawn_blocking(move || hash_password(&password))
+        .await
+        .map_err(|e| Error::Internal(format!("密码哈希任务异常: {e}")))?
+}
+
+pub async fn verify_password_async(
+    password: String,
+    hashed: String,
+) -> Result<bool, Error> {
+    tokio::task::spawn_blocking(move || verify_password(&password, &hashed))
+        .await
+        .map_err(|e| Error::Internal(format!("密码校验任务异常: {e}")))
+}
+
 // ---------------- 输出模型 ----------------
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, ToSchema, sqlx::FromRow)]
 pub struct RoleOut {
     pub id: i64,
     pub role_code: String,
@@ -167,7 +212,7 @@ pub struct RoleOut {
     pub description: String,
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, ToSchema, sqlx::FromRow)]
 pub struct PermissionOut {
     pub id: i64,
     pub perm_code: String,
@@ -250,7 +295,7 @@ pub struct RolePermissionsIn {
 }
 
 // ---------------- 路由 ----------------
-pub fn router(state: Arc<AppState>) -> Router {
+pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/auth/login", post(login))
         .route("/api/auth/me", get(me))
@@ -276,7 +321,7 @@ pub fn router(state: Arc<AppState>) -> Router {
     )
 )]
 async fn login(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     Json(body): Json<LoginIn>,
 ) -> Result<Json<LoginOut>, Error> {
     let user = sqlx::query_as::<_, UserRow>(
@@ -290,7 +335,10 @@ async fn login(
     .await?
     .ok_or_else(|| Error::Unauthorized("用户名或密码错误".into()))?;
 
-    if user.status != 1 || !verify_password(&body.password, &user.password_hash)
+    if user.status != 1 {
+        return Err(Error::Unauthorized("用户名或密码错误".into()));
+    }
+    if !verify_password_async(body.password, user.password_hash.clone()).await?
     {
         return Err(Error::Unauthorized("用户名或密码错误".into()));
     }
@@ -347,7 +395,7 @@ async fn login(
     security(("bearer_auth" = []))
 )]
 async fn me(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
 ) -> Result<Json<UserOut>, Error> {
     let user = fetch_user_by_id(&s.db, auth.user_id)
@@ -364,10 +412,10 @@ async fn me(
     security(("bearer_auth" = []))
 )]
 async fn list_users(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
 ) -> Result<Json<Vec<UserOut>>, Error> {
-    auth.require(&s.db, "user:manage").await?;
+    auth.require(&s, "user:manage").await?;
     let rows = sqlx::query_as::<_, UserRow>(
         "SELECT u.id, u.username, u.password_hash, u.real_name, u.role_id, u.status, \
                 u.created_at, u.updated_at, r.role_code, r.role_name \
@@ -391,11 +439,11 @@ async fn list_users(
     security(("bearer_auth" = []))
 )]
 async fn create_user(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
     Json(body): Json<CreateUserIn>,
 ) -> Result<(StatusCode, Json<UserOut>), Error> {
-    auth.require(&s.db, "user:manage").await?;
+    auth.require(&s, "user:manage").await?;
     let username = body.username.trim().to_string();
     if username.is_empty() || username.len() > 64 {
         return Err(Error::BadRequest("用户名长度需在 1~64 之间".into()));
@@ -411,17 +459,10 @@ async fn create_user(
     if !role_exists {
         return Err(Error::BadRequest("角色不存在".into()));
     }
-    let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM app_user WHERE username = $1)",
-    )
-    .bind(&username)
-    .fetch_one(&s.db)
-    .await?;
-    if exists {
-        return Err(Error::Conflict("用户名已存在".into()));
-    }
-    let hash = hash_password(&body.password)?;
-    let new_id: i64 = sqlx::query_scalar(
+    let hash = hash_password_async(body.password).await?;
+    // 用户名唯一性交给 UNIQUE 约束裁决:预检查 + 插入之间存在 TOCTOU 竞态,
+    // 并发重名注册应得到 409 而非 500
+    let new_id: i64 = match sqlx::query_scalar(
         "INSERT INTO app_user (username, password_hash, real_name, role_id, status) \
          VALUES ($1, $2, $3, $4, 1) RETURNING id",
     )
@@ -430,7 +471,14 @@ async fn create_user(
     .bind(body.real_name.trim())
     .bind(body.role_id)
     .fetch_one(&s.db)
-    .await?;
+    .await
+    {
+        Ok(id) => id,
+        Err(sqlx::Error::Database(e)) if e.code().as_deref() == Some("23505") => {
+            return Err(Error::Conflict("用户名已存在".into()));
+        }
+        Err(e) => return Err(e.into()),
+    };
     let user = fetch_user_by_id(&s.db, new_id)
         .await?
         .ok_or_else(|| Error::Internal("新账号创建后查询失败".into()))?;
@@ -449,11 +497,11 @@ async fn create_user(
     security(("bearer_auth" = []))
 )]
 async fn delete_user(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
     Path(id): Path<i64>,
 ) -> Result<Json<UserOut>, Error> {
-    auth.require(&s.db, "user:manage").await?;
+    auth.require(&s, "user:manage").await?;
     if auth.user_id == id {
         return Err(Error::Forbidden("不能删除当前登录账号".into()));
     }
@@ -490,25 +538,16 @@ async fn fetch_user_by_id(
     security(("bearer_auth" = []))
 )]
 async fn list_roles(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
 ) -> Result<Json<Vec<RoleOut>>, Error> {
-    auth.require(&s.db, "user:manage").await?;
-    let rows = sqlx::query_as::<_, (i64, String, String, String)>(
+    auth.require(&s, "user:manage").await?;
+    let rows = sqlx::query_as::<_, RoleOut>(
         "SELECT id, role_code, role_name, description FROM role ORDER BY id",
     )
     .fetch_all(&s.db)
     .await?;
-    Ok(Json(
-        rows.into_iter()
-            .map(|(id, role_code, role_name, description)| RoleOut {
-                id,
-                role_code,
-                role_name,
-                description,
-            })
-            .collect(),
-    ))
+    Ok(Json(rows))
 }
 
 #[utoipa::path(
@@ -518,28 +557,16 @@ async fn list_roles(
     security(("bearer_auth" = []))
 )]
 async fn list_permissions(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
 ) -> Result<Json<Vec<PermissionOut>>, Error> {
-    auth.require(&s.db, "user:manage").await?;
-    let rows = sqlx::query_as::<_, (i64, String, String, String, String)>(
+    auth.require(&s, "user:manage").await?;
+    let rows = sqlx::query_as::<_, PermissionOut>(
         "SELECT id, perm_code, perm_name, module, description FROM permission ORDER BY id",
     )
     .fetch_all(&s.db)
     .await?;
-    Ok(Json(
-        rows.into_iter()
-            .map(|(id, perm_code, perm_name, module, description)| {
-                PermissionOut {
-                    id,
-                    perm_code,
-                    perm_name,
-                    module,
-                    description,
-                }
-            })
-            .collect(),
-    ))
+    Ok(Json(rows))
 }
 
 #[utoipa::path(
@@ -556,12 +583,12 @@ async fn list_permissions(
     security(("bearer_auth" = []))
 )]
 async fn update_role_permissions(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
     Path(id): Path<i64>,
     Json(body): Json<RolePermissionsIn>,
 ) -> Result<StatusCode, Error> {
-    auth.require(&s.db, "role:manage").await?;
+    auth.require(&s, "role:manage").await?;
     let exists: bool =
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM role WHERE id = $1)")
             .bind(id)
@@ -577,17 +604,21 @@ async fn update_role_permissions(
             .fetch_one(&s.db)
             .await?;
     if role_code.as_deref() == Some("super_admin") {
-        return Err(Error::Forbidden("系统管理员角色的权限固定，不可修改".into()));
+        return Err(Error::Forbidden(
+            "系统管理员角色的权限固定，不可修改".into(),
+        ));
     }
     // 保护 2：不能移除"本角色"的角色权限管理权限（防止把自己锁死）
     if auth.role_id == id {
-        let manage_id: i64 =
-            sqlx::query_scalar("SELECT id FROM permission WHERE perm_code = 'role:manage'")
-                .fetch_one(&s.db)
-                .await?;
+        let manage_id: i64 = sqlx::query_scalar(
+            "SELECT id FROM permission WHERE perm_code = 'role:manage'",
+        )
+        .fetch_one(&s.db)
+        .await?;
         if !body.permission_ids.contains(&manage_id) {
             return Err(Error::Forbidden(
-                "不能移除本角色的「角色权限管理」权限（防止权限管理锁死）".into(),
+                "不能移除本角色的「角色权限管理」权限（防止权限管理锁死）"
+                    .into(),
             ));
         }
     }
@@ -607,27 +638,32 @@ async fn update_role_permissions(
         .bind(id)
         .execute(&mut *tx)
         .await?;
-    for pid in &body.permission_ids {
-        sqlx::query(
-            "INSERT INTO role_permission (role_id, permission_id) VALUES ($1, $2) \
-             ON CONFLICT (role_id, permission_id) DO NOTHING",
-        )
-        .bind(id)
-        .bind(pid)
-        .execute(&mut *tx)
-        .await?;
-    }
+    // 批量插入:unnest 一次完成,避免 N 次 roundtrip
+    sqlx::query(
+        "INSERT INTO role_permission (role_id, permission_id) \
+         SELECT $1, pid FROM unnest($2::bigint[]) AS pid \
+         ON CONFLICT (role_id, permission_id) DO NOTHING",
+    )
+    .bind(id)
+    .bind(&body.permission_ids)
+    .execute(&mut *tx)
+    .await?;
     tx.commit().await?;
+    // RBAC 映射已变:失效该角色的权限缓存,下一请求重新加载
+    s.perm_cache
+        .write()
+        .expect("perm cache lock poisoned")
+        .remove(&id);
     Ok(StatusCode::NO_CONTENT)
 }
 
 /// GET /api/roles/{id}/permissions —— 查询角色当前拥有的权限 ID 列表
 async fn get_role_permissions(
-    State(s): State<Arc<AppState>>,
+    State(s): State<AppState>,
     auth: Auth,
     Path(id): Path<i64>,
 ) -> Result<Json<Vec<i64>>, Error> {
-    auth.require(&s.db, "role:manage").await?;
+    auth.require(&s, "role:manage").await?;
     let ids = sqlx::query_scalar::<_, i64>(
         "SELECT permission_id FROM role_permission WHERE role_id = $1",
     )
@@ -638,7 +674,7 @@ async fn get_role_permissions(
 }
 
 // ---------------- 首次启动的引导管理员 ----------------
-/// 确保"系统管理员"(super_admin)与"路灯管理员"(admin)各有引导账号，账号密码可用环境变量覆盖。
+/// 确保"系统管理员"(`super_admin`)与"路灯管理员"(`admin`)各有引导账号，账号密码可用环境变量覆盖。
 /// 默认: superadmin / superadmin123（系统管理员，权限固定）与 admin / admin123（路灯管理员）
 pub async fn bootstrap_admin(db: &PgPool) -> anyhow::Result<()> {
     ensure_account(
@@ -684,7 +720,8 @@ async fn ensure_account(
     if exists {
         return Ok(());
     }
-    let username = std::env::var(user_env).unwrap_or_else(|_| default_user.to_string());
+    let username =
+        std::env::var(user_env).unwrap_or_else(|_| default_user.to_string());
     let password = std::env::var(pwd_env).unwrap_or_else(|_| {
         tracing::warn!(
             "{pwd_env} 未设置,使用默认账号 {username}/{default_pwd}(生产环境请覆盖)"

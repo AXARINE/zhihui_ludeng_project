@@ -2,6 +2,7 @@ use futures::StreamExt;
 use hmac::{Hmac, KeyInit, Mac};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use sha2::{Digest, Sha256};
+use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -25,16 +26,60 @@ pub fn hmac_raw(key: &[u8], data: &[u8]) -> Vec<u8> {
     mac.finalize().into_bytes().to_vec()
 }
 
+/// 设备密钥(SK)的不透明包装:防止 Debug/Display 意外打印密钥
+#[derive(Clone)]
+pub struct SecretKey(String);
+
+impl SecretKey {
+    const fn as_bytes(&self) -> &[u8] {
+        self.0.as_bytes()
+    }
+}
+
+impl fmt::Debug for SecretKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("SecretKey(***)")
+    }
+}
+
+impl fmt::Display for SecretKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("***")
+    }
+}
+
+/// 北向签名凭据:AK/SK + 区域 + 应用侧域名,四者总是一起使用
+#[derive(Clone)]
+pub struct Credentials {
+    pub ak: String,
+    pub sk: SecretKey,
+    pub region: String,
+    pub host: String,
+}
+
+impl Credentials {
+    pub fn new(
+        ak: impl Into<String>,
+        sk: impl Into<String>,
+        region: impl Into<String>,
+        host: impl Into<String>,
+    ) -> Self {
+        Self {
+            ak: ak.into(),
+            sk: SecretKey(sk.into()),
+            region: region.into(),
+            host: host.into(),
+        }
+    }
+}
+
 /// 华为云 `IoTDA` 北向 API 客户端(AK/SK 签名认证,算法 V11-HMAC-SHA256 衍生签名;标准版/企业版实例必须)
 ///
 /// 端点为实例级域名(cn-south-1 等区域无共享域名),
 /// 通过 `HUAWEI_IOTDA_ENDPOINT` 配置,形如 xxx.st1.iotda-app.cn-south-1.myhuaweicloud.com
 pub struct IothubClient {
-    endpoint: String,
-    region: String,
+    creds: Credentials,
     project_id: String,
-    ak: String,
-    sk: String,
     http: reqwest::Client,
 }
 
@@ -141,16 +186,13 @@ impl IothubClient {
                 // IoTDA 下发命令会同步等设备响应(默认约 20s),超时短于此会误判失败
                 .timeout(Duration::from_secs(35))
                 .build()?,
-            endpoint,
-            region,
+            creds: Credentials::new(ak, sk, region, endpoint),
             project_id,
-            ak,
-            sk,
         })))
     }
 
     fn host(&self) -> &str {
-        &self.endpoint
+        &self.creds.host
     }
 
     fn path_of(&self, path: &str) -> String {
@@ -164,16 +206,7 @@ impl IothubClient {
         sdk_date: &str,
         body: &str,
     ) -> String {
-        sign_derived(
-            &self.ak,
-            &self.sk,
-            &self.region,
-            self.host(),
-            method,
-            uri,
-            sdk_date,
-            body,
-        )
+        sign_derived(&self.creds, method, uri, sdk_date, body)
     }
 
     fn signed_headers(
@@ -309,12 +342,8 @@ impl IothubClient {
 ///
 /// # Panics
 /// `sdk_date` 短于 8 字节(YYYYMMDD 前缀)时 panic;调用方保证传入合法日期串。
-#[allow(clippy::too_many_arguments)]
 pub fn sign_derived(
-    ak: &str,
-    sk: &str,
-    region: &str,
-    host: &str,
+    creds: &Credentials,
     method: &str,
     uri: &str,
     sdk_date: &str,
@@ -322,7 +351,8 @@ pub fn sign_derived(
 ) -> String {
     let signed_headers = "content-type;host;x-sdk-date";
     let canonical_headers = format!(
-        "content-type:application/json\nhost:{host}\nx-sdk-date:{sdk_date}\n"
+        "content-type:application/json\nhost:{}\nx-sdk-date:{sdk_date}\n",
+        creds.host
     );
     let canonical_request = format!(
         "{}\n{}/\n\n{}\n{}\n{}",
@@ -332,9 +362,9 @@ pub fn sign_derived(
         signed_headers,
         sha256_hex(body.as_bytes())
     );
-    let info = format!("{}/{region}/iotdm", &sdk_date[..8]);
+    let info = format!("{}/{}/iotdm", &sdk_date[..8], creds.region);
     // HKDF-Extract: PRK = HMAC(salt=AK, data=SK); HKDF-Expand: T1 = HMAC(key=PRK, data=info||0x01)
-    let prk = hmac_raw(ak.as_bytes(), sk.as_bytes());
+    let prk = hmac_raw(creds.ak.as_bytes(), creds.sk.as_bytes());
     let mut expand = info.as_bytes().to_vec();
     expand.push(0x01);
     let derived_key_hex = hex::encode(hmac_raw(&prk, &expand));
@@ -347,12 +377,13 @@ pub fn sign_derived(
     mac.update(string_to_sign.as_bytes());
     let signature = hex::encode(mac.finalize().into_bytes());
     format!(
-        "V11-HMAC-SHA256 Credential={ak}/{info}, SignedHeaders={signed_headers}, Signature={signature}"
+        "V11-HMAC-SHA256 Credential={}/{info}, SignedHeaders={signed_headers}, Signature={signature}",
+        creds.ak
     )
 }
 
 /// 轮询任务:周期性并发拉取各设备影子/状态入库
-pub async fn run(state: Arc<AppState>, iothub: Arc<IothubClient>) {
+pub async fn run(state: AppState, iothub: Arc<IothubClient>) {
     let mut ticker = tokio::time::interval(Duration::from_secs(8));
     loop {
         ticker.tick().await;
@@ -368,7 +399,8 @@ pub async fn run(state: Arc<AppState>, iothub: Arc<IothubClient>) {
                 }
             };
         futures::stream::iter(devices)
-            .for_each_concurrent(None, |(device_id,)| {
+            // 并发上限 8:设备多时避免同时打出几十个 HTTPS 请求
+            .for_each_concurrent(8, |(device_id,)| {
                 let state = &state;
                 let iothub = &iothub;
                 async move {

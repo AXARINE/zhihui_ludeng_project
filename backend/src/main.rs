@@ -9,10 +9,17 @@ mod tests;
 use axum::Router;
 use iothub::IothubClient;
 use sqlx::postgres::PgPoolOptions;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
+use std::sync::{Arc, RwLock};
 use tower_http::cors::{Any, CorsLayer};
 use utoipa_swagger_ui::SwaggerUi;
 
+/// 角色权限缓存:`role_id` → 权限码集合(命中即免一次 SQL;
+/// 变更只经由 `update_role_permissions`,该接口提交后失效对应条目)
+pub type PermCache = Arc<RwLock<HashMap<i64, Arc<HashSet<String>>>>>;
+
+/// 应用状态。所有字段均为廉价 Clone(PgPool/Arc 内部共享),
+/// 直接作为 axum 状态类型按值克隆,无需再套一层 `Arc<AppState>`
 #[derive(Clone)]
 pub struct AppState {
     pub db: sqlx::PgPool,
@@ -20,6 +27,7 @@ pub struct AppState {
     pub iothub: Option<Arc<IothubClient>>,
     /// JWT 签名密钥,必须通过环境变量 `JWT_SECRET` 覆盖开发默认值
     pub jwt_secret: Arc<str>,
+    pub perm_cache: PermCache,
 }
 
 #[tokio::main]
@@ -53,18 +61,19 @@ async fn main() -> anyhow::Result<()> {
         })
         .into();
 
-    let iothub = IothubClient::from_env()?;
-    let state = Arc::new(AppState {
+    let state = AppState {
         db,
-        iothub: iothub.clone(),
+        iothub: IothubClient::from_env()?,
         jwt_secret,
-    });
+        perm_cache: PermCache::default(),
+    };
 
-    if let Some(hub) = iothub {
+    if let Some(hub) = state.iothub.clone() {
         tokio::spawn(iothub::run(state.clone(), hub));
         tracing::info!("iothub poller started");
     }
 
+    // 允许前端页面跨域访问(开发期放开,上线前按需收紧)
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods(Any)

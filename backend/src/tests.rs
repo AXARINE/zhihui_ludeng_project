@@ -40,11 +40,14 @@ fn v11_derived_sign_known_answer() {
     // 期望值由独立 Python 实现(标准库 hmac/hashlib,按 AGENTS.md 记录的
     // V11 衍生签名规范)生成,锁定"URI 补 '/' / 派生密钥 hex 字符串作 key /
     // 头部块与 SignedHeaders 之间多一个空行"等踩坑点,防回归。
-    let auth = iothub::sign_derived(
+    let creds = iothub::Credentials::new(
         "TESTAK123",
         "TESTSK456",
         "cn-south-1",
         "xxxx.st1.iotda-app.cn-south-1.myhuaweicloud.com",
+    );
+    let auth = iothub::sign_derived(
+        &creds,
         "GET",
         "/v5/iot/test-project-id/devices/dev001/shadow",
         "20260825T101530Z",
@@ -61,11 +64,14 @@ fn v11_derived_sign_known_answer() {
 #[test]
 fn v11_derived_sign_put_with_body_known_answer() {
     // 修改属性(PUT + 非空 body)路径的 KAT:验证请求体参与签名
-    let auth = iothub::sign_derived(
+    let creds = iothub::Credentials::new(
         "TESTAK123",
         "TESTSK456",
         "cn-south-1",
         "xxxx.st1.iotda-app.cn-south-1.myhuaweicloud.com",
+    );
+    let auth = iothub::sign_derived(
+        &creds,
         "PUT",
         "/v5/iot/test-project-id/devices/dev001/properties",
         "20260825T101530Z",
@@ -81,12 +87,11 @@ fn v11_derived_sign_put_with_body_known_answer() {
 
 #[test]
 fn v11_derived_sign_deterministic_and_format() {
+    let creds =
+        iothub::Credentials::new("AK", "SK", "cn-south-1", "host.example.com");
     let sign = |body: &str| {
         iothub::sign_derived(
-            "AK",
-            "SK",
-            "cn-south-1",
-            "host.example.com",
+            &creds,
             "POST",
             "/v5/iot/p/devices/d/commands",
             "20260825T000000Z",
