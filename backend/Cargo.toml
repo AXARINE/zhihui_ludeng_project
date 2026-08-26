@@ -2,6 +2,11 @@
 name = "streetlight-backend"
 version = "0.1.0"
 edition = "2024"
+description = "智慧路灯后端:华为云 IoTDA 北向接入 + axum REST API + PostgreSQL(设备/光照/控灯/告警/账号 RBAC)"
+repository = "https://github.com/AXARINE/zhihui_ludeng_project"
+license = "MIT"
+keywords = ["axum", "iot", "iotda", "postgresql", "smart-streetlight"]
+categories = ["web-programming::http-server"]
 
 [dependencies]
 anyhow = "1"

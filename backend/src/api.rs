@@ -567,7 +567,7 @@ async fn delete_device(
 
 /// 给 `lux_record` 查询追加统一的 WHERE 条件
 /// (`device_id` + 可选时间区间 + 可选 keyset 游标 `before`,严格小于)
-pub(crate) fn push_lux_filters(
+pub fn push_lux_filters(
     qb: &mut sqlx::QueryBuilder<sqlx::Postgres>,
     id: &str,
     from: Option<DateTime<Utc>>,

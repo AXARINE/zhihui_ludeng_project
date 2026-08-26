@@ -70,18 +70,21 @@ impl LoginLimiter {
             return true;
         }
         let now = Instant::now();
-        let mut guard = self.inner.lock().await;
-        let window = guard.entry(ip).or_default();
-        while window
-            .front()
-            .is_some_and(|t| now.duration_since(*t) > Duration::from_secs(60))
         {
-            window.pop_front();
+            // 锁只覆盖计数区段,计数完成后立刻释放(锁守卫带显著 Drop)
+            let mut guard = self.inner.lock().await;
+            let window = guard.entry(ip).or_default();
+            while window.front().is_some_and(|t| {
+                now.duration_since(*t) > Duration::from_secs(60)
+            }) {
+                window.pop_front();
+            }
+            if window.len() >= self.per_minute {
+                return false;
+            }
+            window.push_back(now);
+            drop(guard);
         }
-        if window.len() >= self.per_minute {
-            return false;
-        }
-        window.push_back(now);
         true
     }
 }
@@ -675,16 +678,15 @@ async fn update_user(
     }
     // 构建动态 UPDATE
     let mut qb = sqlx::QueryBuilder::new("UPDATE app_user SET ");
-    let mut changed = false;
-    if let Some(uname) = body
+    let mut changed = body
         .username
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty())
-    {
-        qb.push("username = ").push_bind(uname);
-        changed = true;
-    }
+        .is_some_and(|uname| {
+            qb.push("username = ").push_bind(uname);
+            true
+        });
     if let Some(name) = body
         .real_name
         .as_deref()
