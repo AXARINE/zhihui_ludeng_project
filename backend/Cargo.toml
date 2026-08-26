@@ -11,7 +11,7 @@ chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
 hex = "0.4"
 hmac = "0.13"
-jsonwebtoken = "9"
+jsonwebtoken = "11"
 regex = "1"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }
 serde = { version = "1", features = ["derive"] }
@@ -20,7 +20,7 @@ sha2 = "0.11"
 sqlx = { version = "0.9", features = ["chrono", "migrate", "postgres", "runtime-tokio"] }
 thiserror = "2"
 tokio = { version = "1", features = ["full"] }
-tower-http = { version = "0.6", features = ["cors"] }
+tower-http = { version = "0.7", features = ["cors"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 utoipa = { version = "5.5", features = ["axum_extras", "chrono"] }
