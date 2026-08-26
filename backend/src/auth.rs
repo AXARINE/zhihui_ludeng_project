@@ -16,7 +16,7 @@ use axum::http::request::Parts;
 use axum::http::{Method, StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use chrono::{DateTime, Utc};
 use jsonwebtoken::{
@@ -296,13 +296,22 @@ pub struct RolePermissionsIn {
     pub permission_ids: Vec<i64>,
 }
 
+#[derive(Deserialize, ToSchema)]
+pub struct UpdateUserIn {
+    pub username: Option<String>,
+    pub real_name: Option<String>,
+    pub password: Option<String>,
+    pub role_id: Option<i64>,
+    pub status: Option<i16>,
+}
+
 // ---------------- 路由 ----------------
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/auth/login", post(login))
         .route("/api/auth/me", get(me))
         .route("/api/users", get(list_users).post(create_user))
-        .route("/api/users/{id}", delete(delete_user))
+        .route("/api/users/{id}", patch(update_user).delete(delete_user))
         .route("/api/roles", get(list_roles))
         .route("/api/permissions", get(list_permissions))
         .route(
@@ -514,6 +523,108 @@ async fn delete_user(
         .bind(id)
         .execute(&s.db)
         .await?;
+    Ok(Json(user))
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/users/{id}",
+    params(("id" = i64, Path, description = "账号 ID")),
+    request_body = UpdateUserIn,
+    responses(
+        (status = 200, description = "更新成功", body = UserOut),
+        (status = 400, description = "参数错误"),
+        (status = 403, description = "无权限"),
+        (status = 404, description = "账号不存在")
+    ),
+    security(("bearer_auth" = []))
+)]
+async fn update_user(
+    State(s): State<AppState>,
+    auth: Auth,
+    Path(id): Path<i64>,
+    Json(body): Json<UpdateUserIn>,
+) -> Result<Json<UserOut>, Error> {
+    auth.require(&s, "user:manage").await?;
+    // 检查用户是否存在
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM app_user WHERE id = $1)")
+            .bind(id)
+            .fetch_one(&s.db)
+            .await?;
+    if !exists {
+        return Err(Error::NotFound(format!("账号 {id} 不存在")));
+    }
+    // 如果要改密码，验证长度
+    if let Some(pwd) = &body.password {
+        if pwd.len() < 6 || pwd.len() > 64 {
+            return Err(Error::BadRequest("密码长度需在 6~64 之间".into()));
+        }
+    }
+    // 如果要改用户名，验证长度和唯一性
+    if let Some(uname) = &body.username {
+        let uname = uname.trim();
+        if uname.is_empty() || uname.len() > 64 {
+            return Err(Error::BadRequest("用户名长度需在 1~64 之间".into()));
+        }
+        let dup: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM app_user WHERE username = $1 AND id != $2)",
+        )
+        .bind(uname)
+        .bind(id)
+        .fetch_one(&s.db)
+        .await?;
+        if dup {
+            return Err(Error::Conflict("用户名已存在".into()));
+        }
+    }
+    // 如果要改角色，验证角色存在
+    if let Some(rid) = body.role_id {
+        let role_exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM role WHERE id = $1)")
+                .bind(rid)
+                .fetch_one(&s.db)
+                .await?;
+        if !role_exists {
+            return Err(Error::BadRequest("角色不存在".into()));
+        }
+    }
+    // 构建动态 UPDATE
+    let mut qb = sqlx::QueryBuilder::new("UPDATE app_user SET ");
+    let mut changed = false;
+    if let Some(uname) = body.username.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        qb.push("username = ").push_bind(uname);
+        changed = true;
+    }
+    if let Some(name) = body.real_name.as_deref().map(str::trim).filter(|v| !v.is_empty()) {
+        if changed { qb.push(", "); }
+        qb.push("real_name = ").push_bind(name);
+        changed = true;
+    }
+    if let Some(pwd) = &body.password {
+        if changed { qb.push(", "); }
+        let hash = hash_password(pwd)?;
+        qb.push("password_hash = ").push_bind(hash);
+        changed = true;
+    }
+    if let Some(rid) = body.role_id {
+        if changed { qb.push(", "); }
+        qb.push("role_id = ").push_bind(rid);
+        changed = true;
+    }
+    if let Some(st) = body.status {
+        if changed { qb.push(", "); }
+        qb.push("status = ").push_bind(st);
+        changed = true;
+    }
+    if !changed {
+        return Err(Error::BadRequest("没有可更新的字段".into()));
+    }
+    qb.push(", updated_at = now() WHERE id = ").push_bind(id);
+    qb.build().execute(&s.db).await?;
+    let user = fetch_user_by_id(&s.db, id)
+        .await?
+        .ok_or_else(|| Error::Internal("更新后查询失败".into()))?;
     Ok(Json(user))
 }
 

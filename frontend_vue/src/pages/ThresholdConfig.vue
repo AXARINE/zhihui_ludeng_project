@@ -176,7 +176,7 @@ onMounted(() => {
           <el-slider
             v-model="threshold"
             :min="0"
-            :max="100"
+            :max="300"
             :step="1"
             show-input
           />

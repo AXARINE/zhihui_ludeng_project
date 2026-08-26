@@ -16,6 +16,7 @@
 // ============================================
 import { onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
 
 // 导入 Pinia Store
 import { useDeviceStore } from '@/stores/deviceStore'
@@ -43,9 +44,9 @@ const handleControl = async (data) => {
   const result = await deviceStore.controlDevice(data.deviceId, data.action)
 
   if (result.success) {
-    alert(`设备 ${data.deviceId} 执行 ${data.action} 操作成功！`)
+    ElMessage.success(`设备 ${data.action === 'on' ? '开灯' : data.action === 'off' ? '关灯' : '自动'} 操作成功`)
   } else {
-    alert(`控制失败：${result.message}`)
+    ElMessage.error(`控制失败：${result.message}`)
   }
 }
 

@@ -10,6 +10,17 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 
 // 导入 Pinia Store
 import { useDeviceStore } from '@/stores/deviceStore'
+import { formatBeijingTime } from '@/utils/time'
+
+// ---- 权限判断 ----
+function hasPerm(code) {
+  try {
+    const perms = JSON.parse(localStorage.getItem('permissions') || '[]')
+    const role = JSON.parse(localStorage.getItem('role') || '{}')
+    if (role.role_code === 'super_admin') return true
+    return perms.includes(code)
+  } catch { return false }
+}
 
 // ============================================
 // 1. 定义 props
@@ -68,7 +79,8 @@ const mode = computed(() => {
 })
 
 const lastSeenAt = computed(() => {
-  return device.value ? device.value.last_seen_at : ''
+  const time = device.value ? device.value.last_seen_at : ''
+  return time ? formatBeijingTime(time) : ''
 })
 
 // ============================================
@@ -171,8 +183,8 @@ onUnmounted(() => {
       </span>
     </div>
 
-    <!-- 控制按钮 -->
-    <div class="device-controls">
+    <!-- 控制按钮 — 需要 control:manual 权限 -->
+    <div v-if="hasPerm('control:manual')" class="device-controls">
       <button
         class="btn btn-on"
         @click.stop="handleTurnOn"
@@ -194,6 +206,10 @@ onUnmounted(() => {
       >
         🔄 自动
       </button>
+    </div>
+    <!-- 无权限提示 -->
+    <div v-else class="device-controls no-perm">
+      <span class="no-perm-text">🔒 无控制权限</span>
     </div>
 
     <!-- 最后在线时间 -->
@@ -353,5 +369,15 @@ onUnmounted(() => {
   font-size: 12px;
   color: #999;
   text-align: right;
+}
+
+.no-perm {
+  justify-content: center;
+}
+
+.no-perm-text {
+  font-size: 12px;
+  color: #999;
+  padding: 8px 0;
 }
 </style>

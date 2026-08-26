@@ -59,6 +59,14 @@ export function deleteUser(id) {
 }
 
 // ============================================
+// 更新账号信息
+// PATCH /api/users/{id}
+// ============================================
+export function updateUser(id, data) {
+  return request({ url: `/users/${id}`, method: 'patch', data })
+}
+
+// ============================================
 // 获取审计日志
 // GET /api/commands
 // ============================================
@@ -245,16 +253,24 @@ export function getPermissions() {
 }
 
 // ============================================
-// 13. 更新角色权限
+// 13. 获取角色当前拥有的权限 ID 列表
+// GET /api/roles/{id}/permissions
+// ============================================
+export function getRolePermissions(roleId) {
+  return request({ url: `/roles/${roleId}/permissions`, method: 'get' })
+}
+
+// ============================================
+// 14. 更新角色权限
 // PUT /api/roles/{id}/permissions
 // ============================================
-export function updateRolePermissions(roleId, permissions) {
+export function updateRolePermissions(roleId, permissionIds) {
   return request({
     url: `/roles/${roleId}/permissions`,
     method: 'put',
-    data: { permissions }
+    data: { permission_ids: permissionIds }
   })
-  // permissions: 权限名称数组，例如 ['device:status', 'alarm:log']
+  // permissionIds: 权限 ID 数组，例如 [1, 2, 3]
 }
 
 // ============================================
