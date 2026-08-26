@@ -350,10 +350,12 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 
 返回最新一条 `LuxRecord`；没有数据时返回 `null`。
 
-**GET /api/devices/{id}/lux/history?from=&to=**
+**GET /api/devices/{id}/lux/history?from=&to=&before=&limit=**
 
 - `from` / `to` 可选，RFC3339；闭区间过滤。
-- 结果按 `created_at DESC, id DESC`，最多 5000 条。
+- **分页（keyset 游标）**：`limit` 默认 1000（上限 5000）；结果按 `created_at DESC, id DESC`。
+  翻页时把上一页最后一条的 `created_at` 原样传给 `before`（严格小于），游标翻页走 `(device_id, created_at)` 索引，性能与数据总量无关。不传 `before` 即取最新一页。
+- 数据量大时不要再依赖“一次拿全量”（旧行为默认 LIMIT 5000 已移除，见 `perf/` 压测报告 F4）。
 
 **GET /api/devices/{id}/lux/stats?from=&to=**
 
@@ -665,6 +667,11 @@ cargo build
 | `HUAWEI_PROJECT_ID` | 空 | 华为云项目 ID |
 | `HUAWEI_IOTDA_ENDPOINT` | 空 | IoTDA 实例**应用侧**域名，如 `xxx.st1.iotda-app.cn-south-1.myhuaweicloud.com` |
 | `HUAWEI_IOTDA_REGION` | 从 endpoint 推断 | 标准版/企业版 V11 衍生签名所需区域 |
+| `IOTHUB_DRY_RUN` | `false` | 压测/联调：true 时北向调用本地短路（不发真实华为云请求） |
+| `DATABASE_POOL_SIZE` | `20` | 数据库连接池上限（压测 A/B：5→20 读接口 +77~90%、控灯 +269%） |
+| `ARGON2_MAX_CONCURRENCY` | `32` | Argon2 校验并发闸；每次校验约 19MiB 工作内存，登录风暴下无闸会打爆 RSS（perf 报告 F2） |
+| `LOGIN_RATE_LIMIT_PER_MIN` | `30` | 登录限流：每 IP 每分钟最大尝试次数；0 = 不限流 |
+| `ARGON2_M_COST_KIB` / `ARGON2_T` / `ARGON2_P` | `19456` / `2` / `1` | Argon2id 参数（OWASP 推荐档）；已存密码哈希不受影响（校验按 hash 串内嵌参数执行） |
 | `BOOTSTRAP_SUPER_ADMIN_USERNAME` | `superadmin` | 仅当 `super_admin` 角色无账号时生效 |
 | `BOOTSTRAP_SUPER_ADMIN_PASSWORD` | `superadmin123` | 仅当 `super_admin` 角色无账号时生效，生产必改 |
 | `BOOTSTRAP_ADMIN_USERNAME` | `admin` | 仅当 `admin` 角色无账号时生效 |

@@ -5,13 +5,13 @@
 
 use crate::AppState;
 use crate::api::Error;
-use argon2::Argon2;
 use argon2::password_hash::rand_core::OsRng;
 use argon2::password_hash::{
     PasswordHash, PasswordHasher, PasswordVerifier, SaltString,
 };
+use argon2::{Algorithm, Argon2, Params, Version};
 use axum::extract::Request;
-use axum::extract::{FromRequestParts, Path, State};
+use axum::extract::{ConnectInfo, FromRequestParts, Path, State};
 use axum::http::request::Parts;
 use axum::http::{Method, StatusCode, header};
 use axum::middleware::Next;
@@ -24,11 +24,67 @@ use jsonwebtoken::{
 };
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::{Mutex, Semaphore};
 use utoipa::ToSchema;
 
 const TOKEN_TTL_SECS: i64 = 24 * 60 * 60;
+
+/// Argon2id 默认参数(OWASP 推荐档):m=19456KiB, t=2, p=1。
+/// 部署时可用 `ARGON2_M_COST_KIB` / `ARGON2_T` / `ARGON2_P` 下调(低配机权衡),
+/// **已有密码哈希不受影响** —— 校验永远按 hash 串内嵌参数执行。
+fn argon2_params() -> Params {
+    let env_u32 = |key: &str, default: u32| {
+        std::env::var(key)
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(default)
+    };
+    let m = env_u32("ARGON2_M_COST_KIB", 19_456);
+    let t = env_u32("ARGON2_T", 2);
+    let p = env_u32("ARGON2_P", 1);
+    Params::new(m, t, p, None).expect("合法 Argon2 参数")
+}
+
+/// 登录限流:滑动窗口,同一来源 IP 每 60 秒最多 `per_minute` 次尝试。
+/// `per_minute <= 0` 表示不限流。防登录风暴打爆 Argon2 内存(见 perf 报告 F2)。
+pub struct LoginLimiter {
+    inner: Mutex<HashMap<IpAddr, VecDeque<Instant>>>,
+    per_minute: usize,
+}
+
+impl LoginLimiter {
+    pub fn new(per_minute: usize) -> Self {
+        Self {
+            inner: Mutex::new(HashMap::new()),
+            per_minute,
+        }
+    }
+
+    /// 记录一次尝试并裁决:窗口内次数未超限放行并计数,超限拒绝(不计数)
+    pub async fn try_acquire(&self, ip: IpAddr) -> bool {
+        if self.per_minute == 0 {
+            return true;
+        }
+        let now = Instant::now();
+        let mut guard = self.inner.lock().await;
+        let window = guard.entry(ip).or_default();
+        while window
+            .front()
+            .is_some_and(|t| now.duration_since(*t) > Duration::from_secs(60))
+        {
+            window.pop_front();
+        }
+        if window.len() >= self.per_minute {
+            return false;
+        }
+        window.push_back(now);
+        true
+    }
+}
 
 /// 中间件认证成功后塞进 `Request` extensions 的身份,handler 通过 extractor 取用
 #[derive(Debug, Clone)]
@@ -174,7 +230,7 @@ pub fn is_public(path: &str, method: &Method) -> bool {
 // ---------------- 密码哈希 ----------------
 pub fn hash_password(password: &str) -> Result<String, Error> {
     let salt = SaltString::generate(&mut OsRng);
-    Argon2::default()
+    Argon2::new(Algorithm::Argon2id, Version::V0x13, argon2_params())
         .hash_password(password.as_bytes(), &salt)
         .map(|h| h.to_string())
         .map_err(|e| Error::Internal(format!("密码哈希失败: {e}")))
@@ -182,15 +238,25 @@ pub fn hash_password(password: &str) -> Result<String, Error> {
 
 pub fn verify_password(password: &str, hashed: &str) -> bool {
     PasswordHash::new(hashed).is_ok_and(|parsed| {
+        // argon2 0.5 约定:verify 按 hash 串内嵌的算法/版本/参数执行,
+        // Argon2 实例上的配置不参与 —— 参数调整后老密码哈希依然可用
         Argon2::default()
             .verify_password(password.as_bytes(), &parsed)
             .is_ok()
     })
 }
 
-/// 异步包装:Argon2id 是 CPU 密集操作(默认参数约几十至上百毫秒),
-/// 移到阻塞线程池执行,避免卡住 tokio worker 线程
-pub async fn hash_password_async(password: String) -> Result<String, Error> {
+/// 异步包装:Argon2id 是 CPU/内存密集操作(默认参数约几十毫秒、19MiB 工作内存),
+/// 移到阻塞线程池执行;`sem` 并发闸限制同时进行的哈希数,
+/// 防止登录风暴把内存打爆(压测发现:64~256 并发登录 RSS 飙到 8~12GiB,见 perf 报告 F2)
+pub async fn hash_password_async(
+    password: String,
+    sem: &Semaphore,
+) -> Result<String, Error> {
+    let _permit = sem
+        .acquire()
+        .await
+        .map_err(|_| Error::Internal("密码哈希并发闸已关闭".into()))?;
     tokio::task::spawn_blocking(move || hash_password(&password))
         .await
         .map_err(|e| Error::Internal(format!("密码哈希任务异常: {e}")))?
@@ -199,7 +265,12 @@ pub async fn hash_password_async(password: String) -> Result<String, Error> {
 pub async fn verify_password_async(
     password: String,
     hashed: String,
+    sem: &Semaphore,
 ) -> Result<bool, Error> {
+    let _permit = sem
+        .acquire()
+        .await
+        .map_err(|_| Error::Internal("密码校验并发闸已关闭".into()))?;
     tokio::task::spawn_blocking(move || verify_password(&password, &hashed))
         .await
         .map_err(|e| Error::Internal(format!("密码校验任务异常: {e}")))
@@ -319,13 +390,19 @@ pub fn router(state: AppState) -> Router {
     request_body = LoginIn,
     responses(
         (status = 200, description = "登录成功", body = LoginOut),
-        (status = 401, description = "用户名或密码错误")
+        (status = 401, description = "用户名或密码错误"),
+        (status = 429, description = "尝试过于频繁,请稍后再试")
     )
 )]
 async fn login(
     State(s): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(body): Json<LoginIn>,
 ) -> Result<Json<LoginOut>, Error> {
+    // 限流前置在 Argon2 校验之前:登录风暴是本服务最大的内存风险(见 perf 报告 F2)
+    if !s.login_limiter.try_acquire(addr.ip()).await {
+        return Err(Error::RateLimited("尝试过于频繁,请稍后再试".into()));
+    }
     let user = sqlx::query_as::<_, UserRow>(
         "SELECT u.id, u.username, u.password_hash, u.real_name, u.role_id, u.status, \
                 u.created_at, u.updated_at, r.role_code, r.role_name \
@@ -340,7 +417,12 @@ async fn login(
     if user.status != 1 {
         return Err(Error::Unauthorized("用户名或密码错误".into()));
     }
-    if !verify_password_async(body.password, user.password_hash.clone()).await?
+    if !verify_password_async(
+        body.password,
+        user.password_hash.clone(),
+        &s.argon2_sem,
+    )
+    .await?
     {
         return Err(Error::Unauthorized("用户名或密码错误".into()));
     }
@@ -461,7 +543,7 @@ async fn create_user(
     if !role_exists {
         return Err(Error::BadRequest("角色不存在".into()));
     }
-    let hash = hash_password_async(body.password).await?;
+    let hash = hash_password_async(body.password, &s.argon2_sem).await?;
     // 用户名唯一性交给 UNIQUE 约束裁决:预检查 + 插入之间存在 TOCTOU 竞态,
     // 并发重名注册应得到 409 而非 500
     let new_id: i64 = match sqlx::query_scalar(

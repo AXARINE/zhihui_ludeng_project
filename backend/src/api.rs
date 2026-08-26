@@ -25,6 +25,8 @@ pub enum Error {
     #[error("{0}")]
     Unauthorized(String),
     #[error("{0}")]
+    RateLimited(String),
+    #[error("{0}")]
     Forbidden(String),
     #[error("{0}")]
     NotFound(String),
@@ -44,6 +46,7 @@ impl IntoResponse for Error {
             Self::IothubUnavailable => StatusCode::SERVICE_UNAVAILABLE,
             Self::BadRequest(_) => StatusCode::BAD_REQUEST,
             Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
+            Self::RateLimited(_) => StatusCode::TOO_MANY_REQUESTS,
             Self::Forbidden(_) => StatusCode::FORBIDDEN,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::Conflict(_) => StatusCode::CONFLICT,
@@ -208,6 +211,10 @@ pub struct UpdateDevice {
 pub struct HistoryQuery {
     pub from: Option<String>,
     pub to: Option<String>,
+    /// keyset 游标:只返回 `created_at` 严格早于该时刻的记录(配合 `limit` 翻页)
+    pub before: Option<String>,
+    /// 每页条数,默认 1000,上限 5000
+    pub limit: Option<i64>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -558,12 +565,14 @@ async fn delete_device(
     Ok(StatusCode::NO_CONTENT)
 }
 
-/// 给 `lux_record` 查询追加统一的 WHERE 条件(`device_id` + 可选时间区间)
-fn push_lux_filters(
+/// 给 `lux_record` 查询追加统一的 WHERE 条件
+/// (`device_id` + 可选时间区间 + 可选 keyset 游标 `before`,严格小于)
+pub(crate) fn push_lux_filters(
     qb: &mut sqlx::QueryBuilder<sqlx::Postgres>,
     id: &str,
     from: Option<DateTime<Utc>>,
     to: Option<DateTime<Utc>>,
+    before: Option<DateTime<Utc>>,
 ) {
     qb.push_bind(id);
     if let Some(from) = from {
@@ -571,6 +580,9 @@ fn push_lux_filters(
     }
     if let Some(to) = to {
         qb.push(" AND created_at <= ").push_bind(to);
+    }
+    if let Some(before) = before {
+        qb.push(" AND created_at < ").push_bind(before);
     }
 }
 
@@ -604,9 +616,11 @@ async fn lux_latest(
     params(
         ("id" = String, Path, description = "设备 ID"),
         ("from" = Option<String>, Query, description = "RFC3339 起始时间"),
-        ("to" = Option<String>, Query, description = "RFC3339 结束时间")
+        ("to" = Option<String>, Query, description = "RFC3339 结束时间"),
+        ("before" = Option<String>, Query, description = "keyset 游标:仅返回早于该时刻的记录(翻页用上一页最后一条的 created_at)"),
+        ("limit" = Option<i64>, Query, description = "返回条数,默认 1000,上限 5000")
     ),
-    responses((status = 200, description = "历史光照(倒序,最多 5000 条)", body = Vec<LuxRecord>)),
+    responses((status = 200, description = "历史光照(倒序,默认最多 1000 条,配合 before+limit 翻页)", body = Vec<LuxRecord>)),
     security(("bearer_auth" = []))
 )]
 async fn lux_history(
@@ -617,11 +631,18 @@ async fn lux_history(
 ) -> Result<Json<Vec<LuxRecord>>, Error> {
     auth.require(&s, "luminance:history").await?;
     let (from, to) = parse_time_range(q.from.as_deref(), q.to.as_deref())?;
+    let before = q
+        .before
+        .as_deref()
+        .map(|v| parse_ts("before", v))
+        .transpose()?;
+    let limit = clamp_limit(q.limit, 1_000, 5_000);
     let mut qb = sqlx::QueryBuilder::new(
         "SELECT id, device_id, lux, created_at FROM lux_record WHERE device_id = ",
     );
-    push_lux_filters(&mut qb, &id, from, to);
-    qb.push(" ORDER BY created_at DESC, id DESC LIMIT 5000");
+    push_lux_filters(&mut qb, &id, from, to, before);
+    qb.push(" ORDER BY created_at DESC, id DESC LIMIT ")
+        .push(limit);
     let rows = qb.build_query_as::<LuxRecord>().fetch_all(&s.db).await?;
     Ok(Json(rows))
 }
@@ -651,12 +672,12 @@ async fn lux_stats(
                 MAX(lux)::int AS max, AVG(lux)::float8 AS avg \
          FROM lux_record WHERE device_id = ",
     );
-    push_lux_filters(&mut agg_qb, &id, from, to);
+    push_lux_filters(&mut agg_qb, &id, from, to, None);
 
     let mut latest_qb = sqlx::QueryBuilder::new(
         "SELECT id, device_id, lux, created_at FROM lux_record WHERE device_id = ",
     );
-    push_lux_filters(&mut latest_qb, &id, from, to);
+    push_lux_filters(&mut latest_qb, &id, from, to, None);
     latest_qb.push(" ORDER BY created_at DESC, id DESC LIMIT 1");
 
     // 聚合与最新值互不依赖,并发执行

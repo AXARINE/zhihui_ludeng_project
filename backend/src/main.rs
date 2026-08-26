@@ -7,6 +7,7 @@ mod openapi;
 mod tests;
 mod webhook;
 
+use auth::LoginLimiter;
 use axum::Router;
 use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
 use axum::http::{HeaderValue, Method};
@@ -15,6 +16,7 @@ use sqlx::postgres::PgPoolOptions;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
 use tokio::signal::unix::SignalKind;
+use tokio::sync::Semaphore;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use utoipa_swagger_ui::SwaggerUi;
 
@@ -32,10 +34,33 @@ pub struct AppState {
     /// JWT 签名密钥,必须通过环境变量 `JWT_SECRET` 覆盖开发默认值
     pub jwt_secret: Arc<str>,
     pub perm_cache: PermCache,
+    /// Argon2 校验并发闸(许可数 = `ARGON2_MAX_CONCURRENCY`,默认 32):
+    /// 每次校验 19MiB 工作内存,登录风暴下无闸会被打爆 RSS(见 perf 报告 F2)
+    pub argon2_sem: Arc<Semaphore>,
+    /// 登录限流器(每 IP 每分钟 `LOGIN_RATE_LIMIT_PER_MIN` 次,默认 30,0 禁用)
+    pub login_limiter: Arc<LoginLimiter>,
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+/// 读取正整数环境变量,缺失/非法时回落默认值
+fn env_usize(key: &str, default: usize) -> usize {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(default)
+}
+
+fn main() -> anyhow::Result<()> {
+    // 手写 runtime:`spawn_blocking` 线程上限 512 → 64。
+    // login 的 Argon2 校验经 spawn_blocking 执行,默认上限允许的线程栈
+    // (512×8MiB) 本身就是 4GiB 内存膨胀空间,压测实证 RSS 最高 12GiB(见 perf 报告 F2)
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .max_blocking_threads(64)
+        .enable_all()
+        .build()?;
+    runtime.block_on(async_main())
+}
+
+async fn async_main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
@@ -47,10 +72,15 @@ async fn main() -> anyhow::Result<()> {
         "postgres://streetlight:streetlight@127.0.0.1:5432/streetlight".into()
     });
 
+    // 连接池上限:`DATABASE_POOL_SIZE` 可调,默认 20。
+    // 压测 A/B:5 → 20 时读接口 +77~90%、控灯 +269%(见 perf 报告 F3)
+    let pool_size = u32::try_from(env_usize("DATABASE_POOL_SIZE", 20).max(1))
+        .unwrap_or(u32::MAX);
     let db = PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(pool_size)
         .connect(&database_url)
         .await?;
+    tracing::info!("database pool size: {pool_size}");
     sqlx::migrate!("./migrations").run(&db).await?;
     tracing::info!("database migrated");
 
@@ -65,11 +95,15 @@ async fn main() -> anyhow::Result<()> {
         })
         .into();
 
+    let argon2_concurrency = env_usize("ARGON2_MAX_CONCURRENCY", 32).max(1);
+    let login_limit = env_usize("LOGIN_RATE_LIMIT_PER_MIN", 30);
     let state = AppState {
         db,
         iothub: IothubClient::from_env()?,
         jwt_secret,
         perm_cache: PermCache::default(),
+        argon2_sem: Arc::new(Semaphore::new(argon2_concurrency)),
+        login_limiter: Arc::new(LoginLimiter::new(login_limit)),
     };
 
     if let Some(hub) = state.iothub.clone() {
@@ -122,9 +156,13 @@ async fn main() -> anyhow::Result<()> {
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
     tracing::info!("http listening on 0.0.0.0:8080 (Swagger UI: /docs)");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    // ConnectInfo:登录限流按来源 IP 计数(直连部署;反代后需在网关侧限流)
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
     Ok(())
 }
 

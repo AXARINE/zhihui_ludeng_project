@@ -74,7 +74,10 @@ async fn iotda_callback(
 }
 
 /// 设备注册检查 + 分发到与轮询共用的入库/状态翻转逻辑
-async fn handle_event(db: &sqlx::PgPool, event: NotifyEvent) -> anyhow::Result<()> {
+async fn handle_event(
+    db: &sqlx::PgPool,
+    event: NotifyEvent,
+) -> anyhow::Result<()> {
     match event {
         NotifyEvent::Property {
             device_id,
@@ -104,14 +107,12 @@ async fn device_registered(
     db: &sqlx::PgPool,
     device_id: &str,
 ) -> anyhow::Result<bool> {
-    Ok(
-        sqlx::query_scalar::<_, bool>(
-            "SELECT EXISTS(SELECT 1 FROM device WHERE id=$1)",
-        )
-        .bind(device_id)
-        .fetch_one(db)
-        .await?,
+    Ok(sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM device WHERE id=$1)",
     )
+    .bind(device_id)
+    .fetch_one(db)
+    .await?)
 }
 
 /// 属性上报:`event` 必须是 "report";取 services 中 `service_id == "Light"` 的项

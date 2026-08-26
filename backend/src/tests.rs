@@ -117,7 +117,9 @@ fn v11_derived_sign_deterministic_and_format() {
 fn is_retryable_only_for_network_error_or_5xx() {
     // None = 网络错误(无响应);5xx = 网关/服务端抖动,均可重试
     assert!(iothub::is_retryable(None));
-    assert!(iothub::is_retryable(Some(StatusCode::INTERNAL_SERVER_ERROR)));
+    assert!(iothub::is_retryable(Some(
+        StatusCode::INTERNAL_SERVER_ERROR
+    )));
     assert!(iothub::is_retryable(Some(StatusCode::BAD_GATEWAY)));
     // 2xx 已成功;4xx 是请求/鉴权问题,重试无意义
     assert!(!iothub::is_retryable(Some(StatusCode::OK)));
@@ -361,10 +363,7 @@ fn webhook_event_time_parse() {
         DateTime::parse_from_rfc3339("2026-08-26T10:30:00Z")
             .unwrap()
             .with_timezone(&Utc);
-    assert_eq!(
-        webhook::parse_event_time("20260826T103000Z"),
-        Some(expect)
-    );
+    assert_eq!(webhook::parse_event_time("20260826T103000Z"), Some(expect));
     // 非法串/格式不符 → None(调用方按不去重处理)
     assert_eq!(webhook::parse_event_time("garbage"), None);
     assert_eq!(webhook::parse_event_time("2026-08-26T10:30:00Z"), None);
@@ -528,4 +527,93 @@ fn webhook_unknown_resource_and_missing_fields_ignored() {
     assert!(webhook::parse_notification(&serde_json::json!({})).is_none());
     assert!(webhook::parse_notification(&serde_json::json!([])).is_none());
     assert!(webhook::parse_notification(&serde_json::json!("x")).is_none());
+}
+
+// ---------------- 性能防护(perf 报告 F2/F3/F4 对应的回归测试) ----------------
+
+#[tokio::test]
+async fn login_limiter_window_and_disable() {
+    let limiter = auth::LoginLimiter::new(2);
+    let ip = std::net::IpAddr::from([10, 0, 0, 8]);
+    assert!(limiter.try_acquire(ip).await);
+    assert!(limiter.try_acquire(ip).await);
+    assert!(!limiter.try_acquire(ip).await); // 窗口内第 3 次被拒
+    // 不同 IP 互不影响
+    let other = std::net::IpAddr::from([10, 0, 0, 9]);
+    assert!(limiter.try_acquire(other).await);
+    // 0 = 不限流(perf 报告建议的逃生阀)
+    let unlimited = auth::LoginLimiter::new(0);
+    for _ in 0..10_000 {
+        assert!(unlimited.try_acquire(ip).await);
+    }
+}
+
+#[test]
+fn verify_password_accepts_hash_with_cheaper_params() {
+    // 压测后支持下调 Argon2 参数:旧参数哈希必须继续可用
+    // (argon2 0.5 约定 verify 按 hash 串内嵌参数执行,不依赖当前配置)
+    use argon2::password_hash::{PasswordHasher, SaltString, rand_core::OsRng};
+    use argon2::{Algorithm, Argon2, Params, Version};
+    let salt = SaltString::generate(&mut OsRng);
+    let cheap = Argon2::new(
+        Algorithm::Argon2id,
+        Version::V0x13,
+        Params::new(1_024, 1, 1, None).expect("合法低配参数"),
+    );
+    let hash = cheap.hash_password(b"pw", &salt).unwrap().to_string();
+    assert!(hash.starts_with("$argon2id$v=19$m=1024,t=1,p=1"));
+    assert!(auth::verify_password("pw", &hash));
+    assert!(!auth::verify_password("wrong", &hash));
+    // 默认参数哈希依旧可用(与 Argon2::default() 参数一致)
+    let salt2 = SaltString::generate(&mut OsRng);
+    let h2 = Argon2::default().hash_password(b"pw", &salt2).unwrap();
+    assert!(auth::verify_password("pw", &h2.to_string().as_str()));
+}
+
+#[test]
+fn history_query_deserializes_before_and_limit() {
+    let q: api::HistoryQuery = serde_json::from_value(serde_json::json!({
+        "from": "2026-08-01T00:00:00Z",
+        "before": "2026-08-26T00:00:00Z",
+        "limit": 500
+    }))
+    .unwrap();
+    assert_eq!(q.from.as_deref(), Some("2026-08-01T00:00:00Z"));
+    assert_eq!(q.before.as_deref(), Some("2026-08-26T00:00:00Z"));
+    assert_eq!(q.limit, Some(500));
+    // 缺省字段 → None
+    let q: api::HistoryQuery =
+        serde_json::from_value(serde_json::json!({})).unwrap();
+    assert!(
+        q.from.is_none()
+            && q.to.is_none()
+            && q.before.is_none()
+            && q.limit.is_none()
+    );
+}
+
+#[test]
+fn lux_history_sql_uses_strict_before_cursor() {
+    // keyset 游标必须是严格小于(<),否则同一条记录会跨页重复
+    let before = DateTime::parse_from_rfc3339("2026-08-26T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let mut qb = sqlx::QueryBuilder::new(
+        "SELECT id, device_id, lux, created_at FROM lux_record WHERE device_id = ",
+    );
+    api::push_lux_filters(&mut qb, "dev1", None, None, Some(before));
+    qb.push(" ORDER BY created_at DESC, id DESC LIMIT ")
+        .push(1_000_i64);
+    let sql = qb.sql().as_str().to_string();
+    assert!(
+        sql.contains("AND created_at < "),
+        "缺 before 严格小于谓词: {sql}"
+    );
+    assert!(sql.contains("LIMIT 1000"), "缺分页 limit: {sql}");
+    // 无 before 时不出现该谓词
+    let mut qb2 = sqlx::QueryBuilder::new(
+        "SELECT id, device_id, lux, created_at FROM lux_record WHERE device_id = ",
+    );
+    api::push_lux_filters(&mut qb2, "dev1", None, None, None);
+    assert!(!qb2.sql().as_str().contains("created_at <"));
 }
