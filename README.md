@@ -92,7 +92,34 @@ cd /mnt/e/路灯项目/AXARINE_repo
 bash build.sh
 ```
 
-编译产物在 `out/` 目录，通过 HiBurn 烧录到 BearPi 开发板。
+编译产物在 `bearpi-hm_nano/out/BearPi-HM_Nano/` 目录，通过 HiBurn 烧录到 BearPi 开发板。
+
+#### 固件配置
+
+固件需要配置 WiFi 和设备凭据，复制模板并填入：
+
+```bash
+cd C3_e53_sc1_pls/include
+cp app_config.example.h app_config.h
+```
+
+编辑 `app_config.h`：
+
+```c
+#define CONFIG_WIFI_SSID "你的WiFi名称"      // 2.4G WiFi
+#define CONFIG_WIFI_PWD "你的WiFi密码"
+
+#define CONFIG_APP_DEVICEID "6a8a67bac9429d337f65705e_light"   // IoTDA 设备ID
+#define CONFIG_APP_DEVICEPWD "bearpi123456"                     // 设备密钥
+```
+
+> ⚠️ `app_config.h` 已被 `.gitignore` 忽略，不会提交到仓库。每个人需要自己创建。
+
+#### 烧录步骤
+
+1. 板子 USB 连接电脑
+2. 按住 **BOOT** 键 → 按一下 **RESET** → 松开 BOOT（进入烧录模式）
+3. 用 HiBurn 选择 `Hi3861_wifiiot_app_allinone.bin` 烧录
 
 ## 项目结构
 
@@ -171,3 +198,6 @@ A: 执行 `source ~/.cargo/env` 或重新打开 WSL 终端。
 
 **Q: 固件编译报 symlink 错误**
 A: build.sh 已包含自动修复，确保用 WSL2 运行。
+
+**Q: 板子烧录后显示离线**
+A: 检查 `app_config.h` 中的设备 ID 是否为 `6a8a67bac9429d337f65705e_light`，WiFi 是否为 2.4G（不支持 5G）。
