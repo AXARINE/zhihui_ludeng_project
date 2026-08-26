@@ -240,6 +240,7 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 | GET | `/api/auth/me` | 登录即可 | 当前用户信息 | 200 |
 | GET | `/api/users` | `user:manage` | 账号列表 | 200 |
 | POST | `/api/users` | `user:manage` | 创建账号 | 201 |
+| PATCH | `/api/users/{id}` | `user:manage` | 更新账号（用户名/密码/姓名/角色/状态） | 200 |
 | DELETE | `/api/users/{id}` | `user:manage` | 删除账号（不能删自己） | 200 |
 | GET | `/api/roles` | `user:manage` | 角色列表 | 200 |
 | GET | `/api/permissions` | `user:manage` | 权限列表 | 200 |
@@ -297,6 +298,15 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 ```
 
 校验规则：`username` 去空格后 1~64 字符；密码 6~64 字符；`role_id` 必须存在；用户名唯一。
+
+**PATCH /api/users/{id}**
+
+```jsonc
+// 请求（所有字段可选，至少传一个）
+{ "username": "new_name", "password": "newpass123", "real_name": "新姓名", "role_id": 2, "status": 1 }
+```
+
+校验规则：`username` 修改时需唯一且 1~64 字符；`password` 6~64 字符；`role_id` 必须存在；`status` 只能 0 或 1。
 
 **GET / PUT /api/roles/{id}/permissions**
 

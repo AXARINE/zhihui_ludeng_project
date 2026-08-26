@@ -15,7 +15,6 @@ use iothub::IothubClient;
 use sqlx::postgres::PgPoolOptions;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
-use tokio::signal::unix::SignalKind;
 use tokio::sync::Semaphore;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use utoipa_swagger_ui::SwaggerUi;
@@ -175,7 +174,9 @@ fn permissive_cors() -> CorsLayer {
 }
 
 /// 优雅停机信号:SIGINT(Ctrl+C)与 SIGTERM(`docker stop` 默认发送)任一到达即返回
+#[cfg(unix)]
 async fn shutdown_signal() {
+    use tokio::signal::unix::SignalKind;
     let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())
         .expect("安装 SIGTERM 信号处理器失败");
     tokio::select! {
@@ -189,4 +190,11 @@ async fn shutdown_signal() {
             tracing::info!("收到 SIGTERM,开始优雅停机");
         }
     }
+}
+
+/// Windows 优雅停机:仅监听 Ctrl+C
+#[cfg(not(unix))]
+async fn shutdown_signal() {
+    tokio::signal::ctrl_c().await.expect("监听 Ctrl+C 失败");
+    tracing::info!("收到 Ctrl+C,开始优雅停机");
 }

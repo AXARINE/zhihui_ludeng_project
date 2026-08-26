@@ -3,6 +3,7 @@
  */
 
 import { createRouter, createWebHistory } from 'vue-router'
+import { getMe } from '@/api/device'
 
 const routes = [
   { path: '/', redirect: '/dashboard' },
@@ -61,6 +62,20 @@ const routes = [
     name: 'AssistantQA',
     component: () => import('@/pages/AssistantQA.vue'),
     meta: { title: '智能问答' }
+  },
+
+  {
+    path: '/users',
+    name: 'UserManage',
+    component: () => import('@/pages/UserManage.vue'),
+    meta: { title: '账号管理' }
+  },
+
+  {
+    path: '/permissions',
+    name: 'PermissionManage',
+    component: () => import('@/pages/PermissionManage.vue'),
+    meta: { title: '权限管理' }
   }
 ]
 
@@ -70,14 +85,33 @@ const router = createRouter({
 })
 
 // 路由守卫：未登录跳转登录页
-router.beforeEach((to, from, next) => {
+// 每次路由切换时验证 token 有效性，防止重启前端后自动登录旧账号
+router.beforeEach(async (to, from, next) => {
   document.title = to.meta.title ? `${to.meta.title} - 智慧路灯系统` : '智慧路灯系统'
 
-  const token = localStorage.getItem('token')
-  if (!to.meta.public && !token) {
-    next('/login')
-  } else {
+  // 公开页面（如登录页）直接放行
+  if (to.meta.public) {
     next()
+    return
+  }
+
+  const token = localStorage.getItem('token')
+  if (!token) {
+    next('/login')
+    return
+  }
+
+  // 验证 token 有效性：调用 /api/auth/me
+  try {
+    await getMe()
+    next()
+  } catch (e) {
+    // token 无效或已过期，清除本地数据，跳转登录页
+    localStorage.removeItem('token')
+    localStorage.removeItem('user')
+    localStorage.removeItem('role')
+    localStorage.removeItem('permissions')
+    next('/login')
   }
 })
 

@@ -13,8 +13,10 @@
  */
 
 import { ref, computed, onMounted } from 'vue'
+import { ElMessage } from 'element-plus'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { resolveAlarm, unresolveAlarm } from '@/api/device'
+import { formatBeijingTime } from '@/utils/time'
 
 // ============================================
 // 1. 获取 Store
@@ -76,18 +78,20 @@ const getStatusType = (alarm) => {
 async function handleResolve(id) {
   try {
     await resolveAlarm(id)
+    ElMessage.success('告警已标记为已处理')
     deviceStore.fetchAlarmList()
   } catch (e) {
-    alert('处理失败：' + (e?.response?.data || e.message))
+    ElMessage.error('处理失败：' + (e?.response?.data || e.message))
   }
 }
 
 async function handleUnresolve(id) {
   try {
     await unresolveAlarm(id)
+    ElMessage.success('告警已恢复为未处理')
     deviceStore.fetchAlarmList()
   } catch (e) {
-    alert('操作失败：' + (e?.response?.data || e.message))
+    ElMessage.error('操作失败：' + (e?.response?.data || e.message))
   }
 }
 
@@ -177,12 +181,16 @@ onMounted(() => {
         </el-table-column>
 
         <!-- 创建时间 -->
-        <el-table-column prop="created_at" label="创建时间" width="180" />
+        <el-table-column label="创建时间" width="180">
+          <template #default="{ row }">
+            {{ formatBeijingTime(row.created_at) }}
+          </template>
+        </el-table-column>
 
         <!-- 解决时间 -->
-        <el-table-column prop="resolved_at" label="解决时间" width="180">
+        <el-table-column label="解决时间" width="180">
           <template #default="{ row }">
-            <span v-if="row.resolved_at">{{ row.resolved_at }}</span>
+            <span v-if="row.resolved_at">{{ formatBeijingTime(row.resolved_at) }}</span>
             <span v-else class="pending-text">-</span>
           </template>
         </el-table-column>

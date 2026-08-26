@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { getCommands } from '@/api/device'
+import { formatBeijingTime } from '@/utils/time'
 
 const commands = ref([])
 const loading = ref(false)
@@ -78,7 +79,11 @@ onMounted(loadCommands)
           </template>
         </el-table-column>
         <el-table-column prop="message" label="备注" min-width="200" />
-        <el-table-column prop="created_at" label="时间" width="180" />
+        <el-table-column label="时间" width="180">
+          <template #default="{ row }">
+            {{ formatBeijingTime(row.created_at) }}
+          </template>
+        </el-table-column>
       </el-table>
     </el-card>
   </div>

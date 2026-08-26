@@ -19,6 +19,9 @@ async function handleLogin() {
     const res = await login(form.value.username, form.value.password)
     localStorage.setItem('token', res.token)
     localStorage.setItem('user', JSON.stringify(res.user))
+    // 保存角色和权限信息（后端登录接口现在会返回这些）
+    if (res.role) localStorage.setItem('role', JSON.stringify(res.role))
+    if (res.permissions) localStorage.setItem('permissions', JSON.stringify(res.permissions))
     router.push('/')
   } catch (e) {
     error.value = e?.response?.data || '登录失败，请检查用户名和密码'
