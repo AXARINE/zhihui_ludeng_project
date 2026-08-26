@@ -32,3 +32,10 @@ cargo = "warn"
 nursery = "warn"
 pedantic = "warn"
 perf = "warn"
+
+[profile.release]
+opt-level = 3
+strip = true
+lto = "fat"
+panic = "abort"
+codegen-units = 1
