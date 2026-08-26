@@ -1,6 +1,6 @@
 //! OpenAPI/Swagger 文档:汇总各模块带 `#[utoipa::path]` 注解的 handler
 //! 新增的api请放在这里
-use crate::{api, auth};
+use crate::{api, auth, webhook};
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]
@@ -37,7 +37,8 @@ use utoipa::OpenApi;
         auth::delete_user,
         auth::list_roles,
         auth::list_permissions,
-        auth::update_role_permissions
+        auth::update_role_permissions,
+        webhook::iotda_callback
     )
 )]
 struct ApiDoc;

@@ -2,12 +2,14 @@
 //!
 //! 覆盖:V11-HMAC-SHA256 衍生签名 KAT(锁死已对真实 `IoTDA` 验收的签名行为)、
 //! 密码哈希、公开路径白名单、灯控/在线状态/影子属性的 serde 约定、
-//! 错误状态码映射、时间参数解析与智能问答的意图/时间窗识别。
+//! 错误状态码映射、时间参数解析与智能问答的意图/时间窗识别、
+//! `IoTDA` 数据转发 webhook 的推送体解析。
 
 use crate::api::{self, Error, LampAction};
 use crate::assistant;
 use crate::auth;
 use crate::iothub::{self, OnlineStatus, ShadowProps};
+use crate::webhook;
 use axum::http::{Method, StatusCode};
 use axum::response::IntoResponse;
 use chrono::{DateTime, Duration, Utc};
@@ -109,6 +111,18 @@ fn v11_derived_sign_deterministic_and_format() {
     assert_eq!(sig.len(), 64);
     assert!(sig.chars().all(|c| c.is_ascii_hexdigit()));
     assert_eq!(sig, sig.to_lowercase());
+}
+
+#[test]
+fn is_retryable_only_for_network_error_or_5xx() {
+    // None = 网络错误(无响应);5xx = 网关/服务端抖动,均可重试
+    assert!(iothub::is_retryable(None));
+    assert!(iothub::is_retryable(Some(StatusCode::INTERNAL_SERVER_ERROR)));
+    assert!(iothub::is_retryable(Some(StatusCode::BAD_GATEWAY)));
+    // 2xx 已成功;4xx 是请求/鉴权问题,重试无意义
+    assert!(!iothub::is_retryable(Some(StatusCode::OK)));
+    assert!(!iothub::is_retryable(Some(StatusCode::BAD_REQUEST)));
+    assert!(!iothub::is_retryable(Some(StatusCode::UNAUTHORIZED)));
 }
 
 // ---------------- 设备 / 影子 / 灯控 serde 约定 ----------------
@@ -252,6 +266,7 @@ fn is_public_whitelist() {
         "/docs/",
         "/docs/swagger-ui",
         "/api/openapi.json",
+        "/api/iotda/callback",
     ] {
         assert!(auth::is_public(p, &get), "{p} 应为公开路径");
     }
@@ -336,4 +351,181 @@ fn fmt_time_uses_month_day_clock() {
             .unwrap()
             .with_timezone(&Utc);
     assert_eq!(assistant::fmt_time(dt), "12-01 00:05");
+}
+
+// ---------------- IoTDA 数据转发 webhook(纯解析逻辑,不碰 DB) ----------------
+
+#[test]
+fn webhook_event_time_parse() {
+    let expect: DateTime<Utc> =
+        DateTime::parse_from_rfc3339("2026-08-26T10:30:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+    assert_eq!(
+        webhook::parse_event_time("20260826T103000Z"),
+        Some(expect)
+    );
+    // 非法串/格式不符 → None(调用方按不去重处理)
+    assert_eq!(webhook::parse_event_time("garbage"), None);
+    assert_eq!(webhook::parse_event_time("2026-08-26T10:30:00Z"), None);
+    assert_eq!(webhook::parse_event_time(""), None);
+}
+
+#[test]
+fn webhook_property_report_parse() {
+    let body = serde_json::json!({
+        "resource": "device.property",
+        "event": "report",
+        "event_time": "20260826T103000Z",
+        "notify_data": {
+            "header": {"app_id": "a1", "device_id": "header-fallback"},
+            "body": {
+                "device_id": "dev001",
+                "services": [
+                    {"service_id": "Other", "properties": {"X": 1}},
+                    {
+                        "service_id": "Light",
+                        "properties": {"Luminance": 123, "LightStatus": "ON"},
+                        "event_time": "20260826T103000Z"
+                    }
+                ]
+            }
+        }
+    });
+    let Some(webhook::NotifyEvent::Property {
+        device_id,
+        props,
+        event_time,
+    }) = webhook::parse_notification(&body)
+    else {
+        panic!("应解析为属性上报事件");
+    };
+    assert_eq!(device_id, "dev001");
+    assert_eq!(props.luminance, Some(123));
+    assert_eq!(props.light_status.as_deref(), Some("ON"));
+    let expect: DateTime<Utc> =
+        DateTime::parse_from_rfc3339("2026-08-26T10:30:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+    assert_eq!(event_time, Some(expect));
+
+    // event_time 非法:属性照常解析,仅时间去重字段为 None
+    let mut bad = body.clone();
+    bad["notify_data"]["body"]["services"][1]["event_time"] =
+        serde_json::json!("not-a-time");
+    let Some(webhook::NotifyEvent::Property {
+        props, event_time, ..
+    }) = webhook::parse_notification(&bad)
+    else {
+        panic!("event_time 非法不应丢弃整条属性上报");
+    };
+    assert_eq!(props.luminance, Some(123));
+    assert_eq!(event_time, None);
+
+    // device_id 缺失时退回 header.device_id
+    let mut header_only = body;
+    header_only["notify_data"]["body"]
+        .as_object_mut()
+        .unwrap()
+        .remove("device_id");
+    let Some(webhook::NotifyEvent::Property { device_id, .. }) =
+        webhook::parse_notification(&header_only)
+    else {
+        panic!("应退回 header.device_id");
+    };
+    assert_eq!(device_id, "header-fallback");
+}
+
+#[test]
+fn webhook_status_notification_parse() {
+    let make = |status: &str| {
+        serde_json::json!({
+            "resource": "device.status",
+            "event": "update",
+            "notify_data": {"body": {"device_id": "dev001", "status": status}}
+        })
+    };
+    let Some(webhook::NotifyEvent::Status { device_id, online }) =
+        webhook::parse_notification(&make("ONLINE"))
+    else {
+        panic!("应解析为状态事件");
+    };
+    assert_eq!(device_id, "dev001");
+    assert!(online);
+
+    let Some(webhook::NotifyEvent::Status { online, .. }) =
+        webhook::parse_notification(&make("OFFLINE"))
+    else {
+        panic!("应解析为状态事件");
+    };
+    assert!(!online);
+
+    // 未知状态值宽容忽略
+    assert!(webhook::parse_notification(&make("FLYING")).is_none());
+    // 缺 status / 缺 device_id → 忽略
+    let mut no_status = make("ONLINE");
+    no_status["notify_data"]["body"]
+        .as_object_mut()
+        .unwrap()
+        .remove("status");
+    assert!(webhook::parse_notification(&no_status).is_none());
+    assert!(
+        webhook::parse_notification(&serde_json::json!({
+            "resource": "device.status",
+            "notify_data": {"body": {"status": "ONLINE"}}
+        }))
+        .is_none()
+    );
+}
+
+#[test]
+fn webhook_unknown_resource_and_missing_fields_ignored() {
+    // 不关心的 resource 一律忽略
+    assert!(
+        webhook::parse_notification(&serde_json::json!({
+            "resource": "device.lifecycle",
+            "event": "create",
+            "notify_data": {"body": {"device_id": "dev001"}}
+        }))
+        .is_none()
+    );
+    // device.property 但 event 不是 report
+    assert!(
+        webhook::parse_notification(&serde_json::json!({
+            "resource": "device.property",
+            "event": "delete",
+            "notify_data": {"body": {"device_id": "dev001", "services": []}}
+        }))
+        .is_none()
+    );
+    // 缺 notify_data / 缺 services / services 中无 Light 服务
+    assert!(
+        webhook::parse_notification(&serde_json::json!({
+            "resource": "device.property", "event": "report"
+        }))
+        .is_none()
+    );
+    assert!(
+        webhook::parse_notification(&serde_json::json!({
+            "resource": "device.property",
+            "event": "report",
+            "notify_data": {"body": {"device_id": "dev001"}}
+        }))
+        .is_none()
+    );
+    assert!(
+        webhook::parse_notification(&serde_json::json!({
+            "resource": "device.property",
+            "event": "report",
+            "notify_data": {"body": {
+                "device_id": "dev001",
+                "services": [{"service_id": "Other", "properties": {}}]
+            }}
+        }))
+        .is_none()
+    );
+    // 空 JSON / 非预期类型均不 panic
+    assert!(webhook::parse_notification(&serde_json::json!({})).is_none());
+    assert!(webhook::parse_notification(&serde_json::json!([])).is_none());
+    assert!(webhook::parse_notification(&serde_json::json!("x")).is_none());
 }

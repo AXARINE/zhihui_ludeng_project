@@ -167,6 +167,8 @@ pub fn is_public(path: &str, method: &Method) -> bool {
         || path == "/docs"
         || path.starts_with("/docs/")
         || path == "/api/openapi.json"
+        // IoTDA 数据转发推送入口:免 JWT 无认证(见 webhook.rs 文件头说明)
+        || path == "/api/iotda/callback"
 }
 
 // ---------------- 密码哈希 ----------------

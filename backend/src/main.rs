@@ -5,13 +5,17 @@ mod iothub;
 mod openapi;
 #[cfg(test)]
 mod tests;
+mod webhook;
 
 use axum::Router;
+use axum::http::header::{AUTHORIZATION, CONTENT_TYPE};
+use axum::http::{HeaderValue, Method};
 use iothub::IothubClient;
 use sqlx::postgres::PgPoolOptions;
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, RwLock};
-use tower_http::cors::{Any, CorsLayer};
+use tokio::signal::unix::SignalKind;
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use utoipa_swagger_ui::SwaggerUi;
 
 /// 角色权限缓存:`role_id` → 权限码集合(命中即免一次 SQL;
@@ -73,14 +77,39 @@ async fn main() -> anyhow::Result<()> {
         tracing::info!("iothub poller started");
     }
 
-    // 允许前端页面跨域访问(开发期放开,上线前按需收紧)
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+    // 跨域白名单:ALLOWED_ORIGINS 逗号分隔(各项 trim、空项忽略);
+    // 未设置或解析后为空则保持 Any 全开(开发默认值)
+    let cors = std::env::var("ALLOWED_ORIGINS").map_or_else(
+        |_| permissive_cors(),
+        |raw| {
+            let origins: Vec<HeaderValue> = raw
+                .split(',')
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .filter_map(|s| HeaderValue::from_str(s).ok())
+                .collect();
+            if origins.is_empty() {
+                permissive_cors()
+            } else {
+                tracing::info!("CORS 白名单已启用: {origins:?}");
+                CorsLayer::new()
+                    .allow_origin(AllowOrigin::list(origins))
+                    .allow_methods([
+                        Method::GET,
+                        Method::POST,
+                        Method::PUT,
+                        Method::PATCH,
+                        Method::DELETE,
+                        Method::OPTIONS,
+                    ])
+                    .allow_headers([AUTHORIZATION, CONTENT_TYPE])
+            }
+        },
+    );
 
     let app: Router = api::router(state.clone())
         .merge(auth::router(state.clone()))
+        .merge(webhook::router(state.clone()))
         .merge(
             SwaggerUi::new("/docs")
                 .url("/api/openapi.json", openapi::openapi()),
@@ -93,6 +122,33 @@ async fn main() -> anyhow::Result<()> {
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
     tracing::info!("http listening on 0.0.0.0:8080 (Swagger UI: /docs)");
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
     Ok(())
+}
+
+/// 全放开 CORS(`ALLOWED_ORIGINS` 未设置或解析后为空时的开发默认值)
+fn permissive_cors() -> CorsLayer {
+    CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods(Any)
+        .allow_headers(Any)
+}
+
+/// 优雅停机信号:SIGINT(Ctrl+C)与 SIGTERM(`docker stop` 默认发送)任一到达即返回
+async fn shutdown_signal() {
+    let mut sigterm = tokio::signal::unix::signal(SignalKind::terminate())
+        .expect("安装 SIGTERM 信号处理器失败");
+    tokio::select! {
+        res = tokio::signal::ctrl_c() => {
+            if let Err(err) = res {
+                tracing::error!(%err, "监听 SIGINT 失败");
+            }
+            tracing::info!("收到 SIGINT(Ctrl+C),开始优雅停机");
+        }
+        _ = sigterm.recv() => {
+            tracing::info!("收到 SIGTERM,开始优雅停机");
+        }
+    }
 }

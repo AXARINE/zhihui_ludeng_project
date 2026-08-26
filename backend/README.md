@@ -262,6 +262,7 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 | PATCH | `/api/alarms/{id}` | `alarm:log` | 标记告警已处理/恢复未处理 | 200 |
 | GET | `/api/dashboard` | `device:status` | 首页聚合统计 | 200 |
 | POST | `/api/assistant/ask` | `assistant:qa` | 维护智能问答 | 200 |
+| POST | `/api/iotda/callback` | 公开（免 JWT 无认证） | IoTDA 数据转发 HTTP 推送入口 | 200 |
 
 ### 5.3 认证与账号
 

@@ -142,6 +142,12 @@ async fn ensure_success(
     anyhow::bail!("{status}: {}", body.trim());
 }
 
+/// 是否值得重试:None(网络错误,无响应)或 5xx(网关/服务端抖动)→ true;
+/// 4xx 是请求/鉴权本身有问题,重试无意义
+pub fn is_retryable(status: Option<reqwest::StatusCode>) -> bool {
+    status.is_none_or(|s| s.is_server_error())
+}
+
 impl IothubClient {
     pub fn from_env() -> anyhow::Result<Option<Arc<Self>>> {
         fn env_var(key: &str) -> Option<String> {
@@ -233,25 +239,54 @@ impl IothubClient {
         .collect()
     }
 
+    /// 单次请求最多尝试 3 次:网络错误与 5xx 失败后分别退避 1s、2s 重试;
+    /// 4xx 把响应体带进错误信息后立即返回,不重试
     async fn request(
         &self,
         method: reqwest::Method,
         path: &str,
         body: Option<serde_json::Value>,
     ) -> anyhow::Result<reqwest::Response> {
+        const MAX_ATTEMPTS: u64 = 3;
         let raw = body.map(|b| b.to_string());
-        let headers = self.signed_headers(
-            method.as_str(),
-            path,
-            raw.as_deref().unwrap_or_default(),
-        );
-        let url = format!("https://{}{}", self.host(), self.path_of(path));
-        let req = self.http.request(method, url).headers(headers);
-        let req = match raw {
-            Some(raw) => req.body(raw),
-            None => req,
-        };
-        ensure_success(req.send().await?).await
+        let mut last_err = None;
+        for attempt in 0..MAX_ATTEMPTS {
+            if attempt > 0 {
+                tokio::time::sleep(Duration::from_secs(attempt)).await;
+            }
+            let headers = self.signed_headers(
+                method.as_str(),
+                path,
+                raw.as_deref().unwrap_or_default(),
+            );
+            let url = format!("https://{}{}", self.host(), self.path_of(path));
+            let req =
+                self.http.request(method.clone(), url).headers(headers);
+            let req = match &raw {
+                Some(raw) => req.body(raw.clone()),
+                None => req,
+            };
+            let (err, retryable) = match req.send().await {
+                Ok(resp) if resp.status().is_success() => return Ok(resp),
+                Ok(resp) => {
+                    let retryable = is_retryable(Some(resp.status()));
+                    // 此分支已排除 2xx,ensure_success 必然返回 Err
+                    let err = ensure_success(resp)
+                        .await
+                        .expect_err("2xx 已在上面返回");
+                    (err, retryable)
+                }
+                Err(e) => {
+                    let retryable = is_retryable(e.status());
+                    (e.into(), retryable)
+                }
+            };
+            if !retryable {
+                return Err(err);
+            }
+            last_err = Some(err);
+        }
+        Err(last_err.expect("循环至少执行一次"))
     }
 
     /// 查询设备影子,返回 Light 服务上报的属性
@@ -384,7 +419,17 @@ pub fn sign_derived(
 
 /// 轮询任务:周期性并发拉取各设备影子/状态入库
 pub async fn run(state: AppState, iothub: Arc<IothubClient>) {
-    let mut ticker = tokio::time::interval(Duration::from_secs(8));
+    // 轮询间隔可用 IOTDA_POLL_INTERVAL_SECS 覆盖,未设置/非法/为 0 时默认 8 秒
+    let interval_secs = std::env::var("IOTDA_POLL_INTERVAL_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|&s| s > 0)
+        .unwrap_or(8);
+    tracing::info!("iothub poll interval: {interval_secs}s");
+    let mut ticker =
+        tokio::time::interval(Duration::from_secs(interval_secs));
+    // 单轮轮询超时(如设备多/网络慢)时顺延而不是补打,避免请求叠加
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         ticker.tick().await;
         let devices: Vec<(String,)> =
@@ -414,21 +459,20 @@ pub async fn run(state: AppState, iothub: Arc<IothubClient>) {
     }
 }
 
-async fn poll_device(
-    state: &AppState,
-    iothub: &IothubClient,
+/// 应用设备在线状态(轮询与后续 webhook 推送共用):
+/// 状态翻转时更新 `device.status` 并产生/消解离线告警;在线时刷新 `last_seen_at`
+pub async fn apply_online_status(
+    db: &sqlx::PgPool,
     device_id: &str,
+    online: bool,
 ) -> anyhow::Result<()> {
-    // 先查在线状态:离线时影子保留最后上报值,不能直接当实时数据入库
-    let online = iothub.device_status(device_id).await?.is_online();
-
     // 在线状态变化 → 告警产生/消解
     let changed: Option<(String,)> = sqlx::query_as(
         "UPDATE device SET status=$2 WHERE id=$1 AND status!=$2 RETURNING id",
     )
     .bind(device_id)
     .bind(if online { "online" } else { "offline" })
-    .fetch_optional(&state.db)
+    .fetch_optional(db)
     .await?;
     if changed.is_some() {
         if online {
@@ -437,7 +481,7 @@ async fn poll_device(
                  WHERE device_id=$1 AND type='offline' AND resolved_at IS NULL",
             )
             .bind(device_id)
-            .execute(&state.db)
+            .execute(db)
             .await?;
         } else {
             tracing::warn!("device {device_id} offline");
@@ -445,38 +489,77 @@ async fn poll_device(
                 "INSERT INTO alarm (device_id, type, message) VALUES ($1, 'offline', '设备离线')",
             )
             .bind(device_id)
-            .execute(&state.db)
+            .execute(db)
             .await?;
         }
     }
-
-    if !online {
-        return Ok(());
+    if online {
+        sqlx::query("UPDATE device SET last_seen_at=now() WHERE id=$1")
+            .bind(device_id)
+            .execute(db)
+            .await?;
     }
+    Ok(())
+}
 
-    sqlx::query("UPDATE device SET last_seen_at=now() WHERE id=$1")
-        .bind(device_id)
-        .execute(&state.db)
-        .await?;
-
-    // 影子属性 → 历史库 + 灯态
-    if let Some(props) = iothub.shadow(device_id).await? {
-        if let Some(lux) = props.luminance {
+/// 影子属性入库(轮询与后续 webhook 推送共用):光照写入历史库,灯态更新到设备表。
+/// `recorded_at` 为 None 时 `created_at` 用数据库默认 now();为 Some 时显式写入,
+/// 并按 (`device_id`, `created_at`) 去重(webhook 重复推送不产生重复行)
+pub async fn apply_shadow_props(
+    db: &sqlx::PgPool,
+    device_id: &str,
+    props: &ShadowProps,
+    recorded_at: Option<chrono::DateTime<chrono::Utc>>,
+) -> anyhow::Result<()> {
+    if let Some(lux) = props.luminance {
+        if let Some(ts) = recorded_at {
+            sqlx::query(
+                "INSERT INTO lux_record (device_id, lux, created_at) SELECT $1, $2, $3 \
+                 WHERE NOT EXISTS ( \
+                     SELECT 1 FROM lux_record WHERE device_id=$1 AND created_at=$3)",
+            )
+            .bind(device_id)
+            .bind(lux)
+            .bind(ts)
+            .execute(db)
+            .await?;
+        } else {
             sqlx::query(
                 "INSERT INTO lux_record (device_id, lux) VALUES ($1, $2)",
             )
             .bind(device_id)
             .bind(lux)
-            .execute(&state.db)
+            .execute(db)
             .await?;
         }
-        if let Some(lamp) = &props.light_status {
-            sqlx::query("UPDATE device SET lamp=$2 WHERE id=$1")
-                .bind(device_id)
-                .bind(lamp.to_lowercase())
-                .execute(&state.db)
-                .await?;
-        }
+    }
+    if let Some(lamp) = &props.light_status {
+        sqlx::query("UPDATE device SET lamp=$2 WHERE id=$1")
+            .bind(device_id)
+            .bind(lamp.to_lowercase())
+            .execute(db)
+            .await?;
+    }
+    Ok(())
+}
+
+async fn poll_device(
+    state: &AppState,
+    iothub: &IothubClient,
+    device_id: &str,
+) -> anyhow::Result<()> {
+    // 先查在线状态:离线时影子保留最后上报值,不能直接当实时数据入库
+    let online = iothub.device_status(device_id).await?.is_online();
+
+    apply_online_status(&state.db, device_id, online).await?;
+
+    if !online {
+        return Ok(());
+    }
+
+    // 影子属性 → 历史库 + 灯态
+    if let Some(props) = iothub.shadow(device_id).await? {
+        apply_shadow_props(&state.db, device_id, &props, None).await?;
     }
     Ok(())
 }
