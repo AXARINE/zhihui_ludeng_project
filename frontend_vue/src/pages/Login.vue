@@ -34,20 +34,31 @@ async function handleLogin() {
 <template>
   <div class="login-page">
     <div class="login-card">
-      <h2>智慧路灯管理系统</h2>
-      <p class="subtitle">请登录</p>
-      <div v-if="error" class="error-msg">{{ error }}</div>
-      <div class="form-group">
-        <label>用户名</label>
-        <input v-model="form.username" placeholder="请输入用户名" @keyup.enter="handleLogin" />
+      <!-- 左侧品牌区（窄屏隐藏） -->
+      <div class="brand-pane">
+        <div class="brand-mark">灯</div>
+        <h1>智慧路灯</h1>
+        <p class="brand-sub">IoT 管理系统</p>
+        <p class="brand-foot">BearPi-HM Nano · 华为云 IoTDA</p>
       </div>
-      <div class="form-group">
-        <label>密码</label>
-        <input v-model="form.password" type="password" placeholder="请输入密码" @keyup.enter="handleLogin" />
+
+      <!-- 右侧表单区 -->
+      <div class="form-pane">
+        <h2>登录</h2>
+        <p class="subtitle">欢迎回来，请登录你的账号</p>
+        <div v-if="error" class="error-msg">{{ error }}</div>
+        <div class="form-group">
+          <label>用户名</label>
+          <input v-model="form.username" placeholder="请输入用户名" @keyup.enter="handleLogin" />
+        </div>
+        <div class="form-group">
+          <label>密码</label>
+          <input v-model="form.password" type="password" placeholder="请输入密码" @keyup.enter="handleLogin" />
+        </div>
+        <button class="login-btn" :disabled="loading" @click="handleLogin">
+          {{ loading ? '登录中...' : '登录' }}
+        </button>
       </div>
-      <button class="login-btn" :disabled="loading" @click="handleLogin">
-        {{ loading ? '登录中...' : '登录' }}
-      </button>
     </div>
   </div>
 </template>
@@ -58,29 +69,129 @@ async function handleLogin() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #faf9f5;
+  padding: 20px;
 }
+
 .login-card {
+  display: flex;
+  width: 720px;
+  max-width: 100%;
   background: #fff;
-  padding: 40px;
+  border: 1px solid #e8e4dc;
+  border-radius: 14px;
+  overflow: hidden;
+  box-shadow: 0 8px 32px rgba(60, 50, 40, 0.1);
+}
+
+/* ---- 左侧深墨品牌区 ---- */
+.brand-pane {
+  position: relative;
+  width: 300px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 44px 36px;
+  background: #1c1b1a;
+  color: #f5f3ee;
+  overflow: hidden;
+}
+
+.brand-pane::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(360px 220px at 85% -5%, rgba(201, 106, 74, 0.38), transparent 62%);
+  pointer-events: none;
+}
+
+.brand-mark {
+  position: relative;
+  width: 44px;
+  height: 44px;
   border-radius: 12px;
-  width: 360px;
-  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+  background: linear-gradient(135deg, #c96a4a, #a8532f);
+  color: #fff7f2;
+  font-family: var(--font-serif);
+  font-size: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 10px rgba(201, 106, 74, 0.4);
 }
-.login-card h2 { text-align: center; margin: 0 0 8px; color: #333; }
-.subtitle { text-align: center; color: #999; margin: 0 0 24px; }
+
+.brand-pane h1 {
+  position: relative;
+  margin: auto 0 0;
+  padding-top: 120px;
+  font-family: var(--font-serif);
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.brand-sub {
+  position: relative;
+  margin: 8px 0 0;
+  font-size: 12px;
+  letter-spacing: 0.22em;
+  color: #a8a29c;
+}
+
+.brand-foot {
+  position: relative;
+  margin: 28px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid #2a2825;
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  color: #7a746c;
+}
+
+/* ---- 右侧表单区 ---- */
+.form-pane {
+  flex: 1;
+  padding: 44px 40px;
+}
+
+.form-pane h2 {
+  margin: 0 0 6px;
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 600;
+  color: #1f1c19;
+}
+
+.subtitle {
+  color: #8a837b;
+  font-size: 13px;
+  margin: 0 0 26px;
+}
+
 .form-group { margin-bottom: 16px; }
-.form-group label { display: block; margin-bottom: 6px; color: #555; font-size: 14px; }
+.form-group label { display: block; margin-bottom: 6px; color: #57504a; font-size: 13px; font-weight: 500; }
 .form-group input {
-  width: 100%; padding: 10px 12px; border: 1px solid #ddd; border-radius: 6px;
-  font-size: 14px; box-sizing: border-box;
+  width: 100%; padding: 11px 14px; border: 1px solid #ded9cf; border-radius: 8px;
+  font-size: 14px; box-sizing: border-box; background: #fcfbf8;
+  transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
 }
-.form-group input:focus { border-color: #409eff; outline: none; }
+.form-group input:focus {
+  border-color: #c96a4a; background: #fff; outline: none;
+  box-shadow: 0 0 0 3px rgba(201, 106, 74, 0.14);
+}
 .login-btn {
-  width: 100%; padding: 12px; background: #409eff; color: #fff; border: none;
-  border-radius: 6px; font-size: 16px; cursor: pointer; margin-top: 8px;
+  width: 100%; padding: 12px; background: #c96a4a; color: #fff7f2; border: none;
+  border-radius: 8px; font-size: 15px; font-weight: 500; letter-spacing: 0.1em;
+  cursor: pointer; margin-top: 8px;
+  transition: background 0.2s;
 }
-.login-btn:hover { background: #66b1ff; }
-.login-btn:disabled { background: #a0cfff; cursor: not-allowed; }
-.error-msg { background: #fef0f0; color: #f56c6c; padding: 10px; border-radius: 6px; margin-bottom: 16px; font-size: 14px; }
+.login-btn:hover { background: #b85a3c; }
+.login-btn:disabled { background: #e4b5a5; cursor: not-allowed; }
+.error-msg { background: #f9ece9; color: #be4b40; padding: 10px 12px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; }
+
+/* 窄屏：隐藏品牌区，单栏表单 */
+@media (max-width: 720px) {
+  .brand-pane { display: none; }
+  .login-card { width: 400px; }
+}
 </style>

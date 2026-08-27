@@ -248,22 +248,37 @@ onMounted(() => {
 
 <style scoped>
 .device-list-page {
-  padding: 20px;
+  padding: 24px;
 }
 
 .page-header {
   margin-bottom: 20px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #efebe3;
 }
 
 .page-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0 0 8px 0;
   font-size: 24px;
-  color: #333;
+  font-family: var(--font-serif);
+  font-weight: 600;
+  color: #1f1c19;
+}
+
+.page-header h2::before {
+  content: '';
+  width: 4px;
+  height: 0.95em;
+  background: #c96a4a;
+  border-radius: 2px;
 }
 
 .page-header p {
   margin: 0;
-  color: #666;
+  color: #8a837b;
 }
 
 .filter-card {
@@ -275,11 +290,25 @@ onMounted(() => {
 }
 
 .lamp-on {
-  color: #ff9800;
-  font-weight: bold;
+  color: #c08340;
+  font-weight: 600;
 }
 
 .lamp-off {
-  color: #9e9e9e;
+  color: #a8a29c;
+}
+
+/* 筛选控件：默认宽度太窄，选中项显示不下 */
+.filter-card .el-select {
+  width: 180px;
+}
+
+.filter-card .el-input {
+  width: 220px;
+}
+
+/* 筛选栏单行紧凑 */
+.filter-card .el-form-item {
+  margin-bottom: 0;
 }
 </style>

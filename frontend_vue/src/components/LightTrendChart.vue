@@ -159,14 +159,18 @@ const updateChart = (times, values, period) => {
   const threshold = deviceStore.thresholdConfig?.threshold || 120
 
   const option = {
-    title: {
-      text: `光照强度趋势（${period.label}）`,
-      left: 'center',
-      textStyle: { fontSize: 14 }
-    },
+    // 页面每 5 秒轮询会触发整图重绘，关闭动画防止参考线/折线反复播入场动画
+    animation: false,
 
+    // 提示框：白底暖边 + 轻投影
     tooltip: {
       trigger: 'axis',
+      backgroundColor: '#ffffff',
+      borderColor: '#e8e4dc',
+      borderWidth: 1,
+      padding: [8, 12],
+      textStyle: { color: '#1f1c19', fontSize: 12 },
+      extraCssText: 'box-shadow: 0 4px 16px rgba(60, 50, 40, 0.12); border-radius: 8px;',
       formatter: function(params) {
         const p = params[0]
         return `${p.axisValue}<br/>光照强度：<b>${p.value}</b> lux`
@@ -176,16 +180,22 @@ const updateChart = (times, values, period) => {
     xAxis: {
       type: 'category',
       data: times,
+      boundaryGap: false,
       axisLabel: {
         rotate: times.length > 30 ? 45 : 0,
-        fontSize: 10
+        fontSize: 10,
+        color: '#a8a29c'
       },
-      axisTick: { alignWithLabel: true }
+      axisLine: { show: false },
+      axisTick: { show: false }
     },
 
     yAxis: {
       type: 'value',
       name: 'lux',
+      nameTextStyle: { color: '#b4ada3', fontSize: 11 },
+      axisLabel: { color: '#a8a29c', fontSize: 11 },
+      splitLine: { lineStyle: { color: '#f0ece4', type: 'dashed' } },
       min: 0
     },
 
@@ -196,22 +206,25 @@ const updateChart = (times, values, period) => {
         data: values,
         smooth: true,
         showSymbol: values.length < 50,
+        symbol: 'circle',
+        symbolSize: 5,
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(64, 158, 255, 0.3)' },
-            { offset: 1, color: 'rgba(64, 158, 255, 0.05)' }
+            { offset: 0, color: 'rgba(201, 106, 74, 0.18)' },
+            { offset: 1, color: 'rgba(201, 106, 74, 0.02)' }
           ])
         },
-        lineStyle: { color: '#409eff', width: 2 },
-        itemStyle: { color: '#409eff' },
+        lineStyle: { color: '#c96a4a', width: 2.5 },
+        itemStyle: { color: '#c96a4a', borderColor: '#ffffff', borderWidth: 1.5 },
         // 阈值参考线
         markLine: {
           silent: true,
+          symbol: 'none',
           data: [
             {
               yAxis: threshold,
-              label: { formatter: `阈值 ${threshold}`, position: 'end' },
-              lineStyle: { color: '#e6a23c', type: 'dashed', width: 1 }
+              label: { formatter: `阈值 ${threshold}`, position: 'insideEndTop', color: '#c08340', fontSize: 11 },
+              lineStyle: { color: '#dda15e', type: 'dashed', width: 1 }
             }
           ]
         }
@@ -219,10 +232,10 @@ const updateChart = (times, values, period) => {
     ],
 
     grid: {
-      left: '3%',
-      right: '4%',
-      bottom: '3%',
-      top: 50,
+      left: '2%',
+      right: '3%',
+      bottom: '2%',
+      top: 28,
       containLabel: true
     },
 
@@ -233,8 +246,8 @@ const updateChart = (times, values, period) => {
       top: 'middle',
       style: {
         text: '暂无数据',
-        fontSize: 16,
-        fill: '#999'
+        fontSize: 14,
+        fill: '#b4ada3'
       }
     }] : []
   }
@@ -287,17 +300,20 @@ onUnmounted(() => {
 
 <template>
   <div class="light-trend-chart">
-    <!-- 时间周期选择器 -->
-    <div class="period-selector">
-      <button
-        v-for="p in periods"
-        :key="p.key"
-        :class="['period-btn', { active: activePeriod === p.key }]"
-        @click="switchPeriod(p.key)"
-      >
-        {{ p.label }}
-      </button>
-      <span v-if="loading" class="loading-text">加载中...</span>
+    <!-- 头部：标题 + 时间周期选择器 -->
+    <div class="chart-head">
+      <h3 class="chart-title">光照强度趋势</h3>
+      <div class="period-selector">
+        <button
+          v-for="p in periods"
+          :key="p.key"
+          :class="['period-btn', { active: activePeriod === p.key }]"
+          @click="switchPeriod(p.key)"
+        >
+          {{ p.label }}
+        </button>
+        <span v-if="loading" class="loading-text">加载中...</span>
+      </div>
     </div>
 
     <!-- 图表容器 -->
@@ -310,44 +326,69 @@ onUnmounted(() => {
   width: 100%;
 }
 
+/* 头部：左标题 + 右周期按钮 */
+.chart-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding: 0 4px;
+}
+
+.chart-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1f1c19;
+}
+
+.chart-title::before {
+  content: '';
+  width: 3px;
+  height: 14px;
+  background: #c96a4a;
+  border-radius: 2px;
+}
+
 .period-selector {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 12px;
-  padding: 0 8px;
 }
 
 .period-btn {
   padding: 4px 14px;
-  border: 1px solid #dcdfe6;
-  border-radius: 4px;
+  border: 1px solid #ded9cf;
+  border-radius: 20px;
   background: #fff;
-  color: #606266;
+  color: #57504a;
   font-size: 13px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .period-btn:hover {
-  border-color: #409eff;
-  color: #409eff;
+  border-color: #c96a4a;
+  color: #c96a4a;
 }
 
 .period-btn.active {
-  background: #409eff;
-  border-color: #409eff;
-  color: #fff;
+  background: #c96a4a;
+  border-color: #c96a4a;
+  color: #fff7f2;
 }
 
 .loading-text {
   font-size: 12px;
-  color: #999;
+  color: #b4ada3;
   margin-left: 8px;
 }
 
 .chart-container {
   width: 100%;
-  height: 400px;
+  height: 380px;
 }
 </style>

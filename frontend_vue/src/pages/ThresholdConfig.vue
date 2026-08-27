@@ -238,22 +238,37 @@ onMounted(() => {
 
 <style scoped>
 .threshold-config-page {
-  padding: 20px;
+  padding: 24px;
 }
 
 .page-header {
   margin-bottom: 20px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #efebe3;
 }
 
 .page-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0 0 8px 0;
   font-size: 24px;
-  color: #333;
+  font-family: var(--font-serif);
+  font-weight: 600;
+  color: #1f1c19;
+}
+
+.page-header h2::before {
+  content: '';
+  width: 4px;
+  height: 0.95em;
+  background: #c96a4a;
+  border-radius: 2px;
 }
 
 .page-header p {
   margin: 0;
-  color: #666;
+  color: #8a837b;
 }
 
 .device-select-card {
@@ -277,7 +292,7 @@ onMounted(() => {
 
 .form-tip {
   font-size: 12px;
-  color: #999;
+  color: #b4ada3;
   margin-top: 4px;
 }
 
@@ -288,13 +303,13 @@ onMounted(() => {
 .no-device {
   text-align: center;
   padding: 40px;
-  color: #666;
+  color: #8a837b;
   font-size: 16px;
 }
 
 .info-content h4 {
   margin: 20px 0 10px 0;
-  color: #333;
+  color: #1f1c19;
 }
 
 .info-content h4:first-child {
@@ -303,7 +318,7 @@ onMounted(() => {
 
 .info-content p {
   margin: 0 0 15px 0;
-  color: #666;
-  line-height: 1.6;
+  color: #57504a;
+  line-height: 1.7;
 }
 </style>

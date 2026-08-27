@@ -194,18 +194,33 @@ function handleCheckChange(permId, checked) {
 
 .page-header {
   margin-bottom: 24px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #efebe3;
 }
 
 .page-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0 0 4px 0;
-  font-size: 20px;
-  color: #303133;
+  font-size: 24px;
+  font-family: var(--font-serif);
+  font-weight: 600;
+  color: #1f1c19;
+}
+
+.page-header h2::before {
+  content: '';
+  width: 4px;
+  height: 0.95em;
+  background: #c96a4a;
+  border-radius: 2px;
 }
 
 .page-header .desc {
   margin: 0;
   font-size: 14px;
-  color: #909399;
+  color: #8a837b;
 }
 
 .perm-content {
@@ -219,8 +234,8 @@ function handleCheckChange(permId, checked) {
   width: 280px;
   flex-shrink: 0;
   background: #fff;
-  border-radius: 8px;
-  border: 1px solid #e4e7ed;
+  border-radius: 10px;
+  border: 1px solid #e8e4dc;
   overflow: hidden;
 }
 
@@ -228,9 +243,9 @@ function handleCheckChange(permId, checked) {
   padding: 14px 16px;
   font-size: 15px;
   font-weight: 600;
-  color: #303133;
-  background: #f5f7fa;
-  border-bottom: 1px solid #e4e7ed;
+  color: #1f1c19;
+  background: #f5f2ec;
+  border-bottom: 1px solid #e8e4dc;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -244,41 +259,43 @@ function handleCheckChange(permId, checked) {
 .role-item {
   padding: 14px 16px;
   cursor: pointer;
-  border-bottom: 1px solid #f0f2f5;
+  border-bottom: 1px solid #f5f2ec;
+  border-left: 3px solid transparent;
   transition: background 0.15s;
 }
 
 .role-item:hover {
-  background: #f5f7fa;
+  background: #faf8f3;
 }
 
 .role-item.active {
-  background: #ecf5ff;
-  border-left: 3px solid #409eff;
+  background: #faede7;
+  border-left: 3px solid #c96a4a;
 }
 
 .role-name {
   font-size: 14px;
   font-weight: 600;
-  color: #303133;
+  color: #1f1c19;
 }
 
 .role-code {
   font-size: 12px;
-  color: #909399;
+  font-family: var(--font-mono);
+  color: #8a837b;
   margin-top: 2px;
 }
 
 .role-desc {
   font-size: 12px;
-  color: #c0c4cc;
+  color: #b4ada3;
   margin-top: 4px;
 }
 
 .empty-hint {
   padding: 40px 16px;
   text-align: center;
-  color: #c0c4cc;
+  color: #b4ada3;
   font-size: 14px;
 }
 
@@ -286,8 +303,8 @@ function handleCheckChange(permId, checked) {
 .perm-panel {
   flex: 1;
   background: #fff;
-  border-radius: 8px;
-  border: 1px solid #e4e7ed;
+  border-radius: 10px;
+  border: 1px solid #e8e4dc;
   padding: 20px;
   min-height: 400px;
 }
@@ -299,8 +316,8 @@ function handleCheckChange(permId, checked) {
 }
 
 .perm-group {
-  border: 1px solid #f0f2f5;
-  border-radius: 6px;
+  border: 1px solid #efebe3;
+  border-radius: 8px;
   overflow: hidden;
 }
 
@@ -308,9 +325,9 @@ function handleCheckChange(permId, checked) {
   padding: 10px 14px;
   font-size: 13px;
   font-weight: 600;
-  color: #606266;
-  background: #fafafa;
-  border-bottom: 1px solid #f0f2f5;
+  color: #57504a;
+  background: #faf8f3;
+  border-bottom: 1px solid #efebe3;
 }
 
 .group-items {
@@ -322,12 +339,13 @@ function handleCheckChange(permId, checked) {
 
 .perm-name {
   font-size: 13px;
-  color: #303133;
+  color: #1f1c19;
 }
 
 .perm-code {
   font-size: 12px;
-  color: #909399;
+  font-family: var(--font-mono);
+  color: #8a837b;
   margin-left: 4px;
 }
 
@@ -340,7 +358,7 @@ function handleCheckChange(permId, checked) {
 
 .save-hint {
   font-size: 12px;
-  color: #909399;
+  color: #8a837b;
 }
 
 .no-selection {
@@ -348,7 +366,7 @@ function handleCheckChange(permId, checked) {
   align-items: center;
   justify-content: center;
   height: 300px;
-  color: #c0c4cc;
+  color: #b4ada3;
   font-size: 16px;
 }
 </style>

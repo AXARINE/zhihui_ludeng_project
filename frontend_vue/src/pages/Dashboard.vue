@@ -79,7 +79,8 @@ onUnmounted(() => {
     <!-- 页面标题 -->
     <!-- ============================================ -->
     <header class="page-header">
-      <h1>🏮 智慧路灯管理系统</h1>
+      <p class="eyebrow">Smart Street Light</p>
+      <h1>智慧路灯管理系统</h1>
       <p class="subtitle">IoT 设备监控平台</p>
     </header>
 
@@ -88,28 +89,28 @@ onUnmounted(() => {
     <!-- ============================================ -->
     <section class="stats-section">
       <div class="stat-card">
-        <span class="stat-value">{{ deviceStore.deviceTotal }}</span>
         <span class="stat-label">设备总数</span>
+        <span class="stat-value">{{ deviceStore.deviceTotal }}</span>
       </div>
       <div class="stat-card lamp-on">
+        <span class="stat-label">已开灯</span>
         <span class="stat-value">{{ deviceStore.lampOnCount }}</span>
-        <span class="stat-label">💡 已开灯</span>
       </div>
       <div class="stat-card lamp-off">
+        <span class="stat-label">已关灯</span>
         <span class="stat-value">{{ deviceStore.lampOffCount }}</span>
-        <span class="stat-label">🌑 已关灯</span>
       </div>
       <div class="stat-card online">
-        <span class="stat-value">{{ deviceStore.onlineCount }}</span>
         <span class="stat-label">在线设备</span>
+        <span class="stat-value">{{ deviceStore.onlineCount }}</span>
       </div>
       <div class="stat-card offline">
-        <span class="stat-value">{{ deviceStore.offlineCount }}</span>
         <span class="stat-label">离线设备</span>
+        <span class="stat-value">{{ deviceStore.offlineCount }}</span>
       </div>
       <div class="stat-card fault">
-        <span class="stat-value">{{ deviceStore.faultCount }}</span>
         <span class="stat-label">故障设备</span>
+        <span class="stat-value">{{ deviceStore.faultCount }}</span>
       </div>
     </section>
 
@@ -164,91 +165,152 @@ onUnmounted(() => {
 
 <style scoped>
 .dashboard {
-  padding: 20px;
+  padding: 24px;
   max-width: 1200px;
   margin: 0 auto;
 }
 
+/* 页头 hero：深墨 + 赤陶辉光 */
 .page-header {
+  position: relative;
+  overflow: hidden;
   text-align: center;
-  padding: 40px 0;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border-radius: 12px;
-  margin-bottom: 30px;
+  padding: 52px 24px 48px;
+  background: #1c1b1a;
+  color: #f5f3ee;
+  border-radius: 14px;
+  margin-bottom: 24px;
+}
+
+.page-header::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(640px 220px at 78% -10%, rgba(201, 106, 74, 0.32), transparent 62%);
+  pointer-events: none;
+}
+
+.eyebrow {
+  position: relative;
+  font-size: 11px;
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: #e09b83;
+  margin-bottom: 14px;
 }
 
 .page-header h1 {
+  position: relative;
   font-size: 32px;
-  margin-bottom: 8px;
+  font-family: var(--font-serif);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  margin-bottom: 12px;
 }
 
 .subtitle {
-  font-size: 16px;
-  opacity: 0.9;
+  position: relative;
+  font-size: 13px;
+  letter-spacing: 0.22em;
+  color: #a8a29c;
 }
 
 .stats-section {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
   gap: 16px;
-  margin-bottom: 30px;
+  margin-bottom: 24px;
 }
 
+/* 统计卡：左对齐编辑风，标签 + 大数字 */
 .stat-card {
-  background: white;
-  padding: 20px;
-  border-radius: 8px;
-  text-align: center;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  background: #ffffff;
+  border: 1px solid #e8e4dc;
+  padding: 18px 20px 16px;
+  border-radius: 12px;
+  text-align: left;
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.2s, transform 0.2s;
+}
+
+.stat-card:hover {
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+.stat-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  color: #8a837b;
+}
+
+.stat-label::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #c96a4a;
+  flex-shrink: 0;
 }
 
 .stat-value {
   display: block;
   font-size: 32px;
-  font-weight: bold;
-  color: #333;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: #1f1c19;
+  margin-top: 10px;
 }
 
-.stat-label {
-  display: block;
-  font-size: 14px;
-  color: #666;
-  margin-top: 4px;
+.stat-card.online .stat-label::before {
+  background: #5f8f5a;
 }
 
-.stat-card.online .stat-value {
-  color: #4caf50;
+.stat-card.offline .stat-label::before {
+  background: #c7c0b6;
 }
 
-.stat-card.offline .stat-value {
-  color: #9e9e9e;
+.stat-card.fault .stat-label::before {
+  background: #be4b40;
 }
 
-.stat-card.fault .stat-value {
-  color: #f44336;
+.stat-card.lamp-on .stat-label::before {
+  background: #dda15e;
 }
 
-.stat-card.lamp-on .stat-value {
-  color: #ff9800;
-}
-
-.stat-card.lamp-off .stat-value {
-  color: #9e9e9e;
+.stat-card.lamp-off .stat-label::before {
+  background: #c7c0b6;
 }
 
 .charts-section {
-  margin-bottom: 30px;
+  margin-bottom: 24px;
 }
 
 .chart-card {
   margin-bottom: 20px;
 }
 
+/* 小节标题：衬线 + 赤陶标尺 */
 .device-section h2 {
-  font-size: 24px;
-  color: #333;
-  margin-bottom: 20px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 22px;
+  font-family: var(--font-serif);
+  font-weight: 600;
+  color: #1f1c19;
+  margin-bottom: 16px;
+}
+
+.device-section h2::before {
+  content: '';
+  width: 4px;
+  height: 20px;
+  background: #c96a4a;
+  border-radius: 2px;
 }
 
 .device-grid {

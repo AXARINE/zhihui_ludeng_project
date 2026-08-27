@@ -1,34 +1,48 @@
 /**
- * 全局样式文件
+ * 全局样式文件 — 「深栏暖纸」主题
  *
- * 作用：定义整个应用的通用样式
- * 包含：
- * - 重置浏览器默认样式
- * - 通用工具类
- * - 全局变量
+ * 设计语言（参考 claude.com / pi.dev 的暖纸极简风）：
+ * - 内容区：暖米白纸质背景 #FAF9F5，白卡片 + 细暖灰边框，几乎无投影
+ * - 侧边栏：深墨 #1C1B1A（见 App.vue）
+ * - 点缀色：赤陶 #C96A4A，只用于主按钮、激活态、重点数据
+ * - 字体：标题衬线（paper 感）、正文无衬线、数字等宽
+ *
+ * Element Plus 换肤原理：
+ * 2.x 全部组件颜色都读取 --el-* CSS 变量，在 :root 覆盖即可全局生效，
+ * 不需要改任何组件代码。
  */
 
 /* ============================================ */
-/* 1. CSS 变量（统一管理颜色、间距等） */
+/* 1. 设计令牌（本项目自定义变量） */
 /* ============================================ */
 :root {
-  /* 主色调 */
-  --primary-color: #409eff;
-  --success-color: #67c23a;
-  --warning-color: #e6a23c;
-  --danger-color: #f56c6c;
-  --info-color: #909399;
+  /* 主色调 — 赤陶 */
+  --primary-color: #c96a4a;
+  --primary-dark: #a8532f;
+  --primary-light: #e09b83;
+  --primary-tint: #faede7;   /* 极浅赤陶，用于选中态底色 */
+
+  /* 语义色（暖调） */
+  --success-color: #5f8f5a;
+  --warning-color: #dda15e;
+  --danger-color: #be4b40;
+  --info-color: #8a837b;
 
   /* 文字颜色 */
-  --text-primary: #303133;
-  --text-regular: #606266;
-  --text-secondary: #909399;
-  --text-placeholder: #c0c4cc;
+  --text-primary: #1f1c19;   /* 墨色 */
+  --text-regular: #57504a;
+  --text-secondary: #8a837b;
+  --text-placeholder: #b4ada3;
 
   /* 背景颜色 */
-  --bg-color: #f0f2f5;
+  --bg-color: #faf9f5;       /* 暖米白（纸） */
   --bg-white: #ffffff;
-  --bg-dark: #304156;
+  --bg-dark: #1c1b1a;        /* 深墨（侧边栏） */
+  --bg-warm: #f5f2ec;        /* 表头/面板底 */
+
+  /* 边框 */
+  --border-color: #e8e4dc;
+  --border-color-dark: #ded9cf;
 
   /* 间距 */
   --spacing-xs: 4px;
@@ -42,14 +56,121 @@
   --border-radius-md: 8px;
   --border-radius-lg: 12px;
 
-  /* 阴影 */
-  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.1);
-  --shadow-md: 0 2px 8px rgba(0, 0, 0, 0.12);
-  --shadow-lg: 0 2px 12px rgba(0, 0, 0, 0.15);
+  /* 阴影（暖调、极轻） */
+  --shadow-sm: 0 1px 2px rgba(60, 50, 40, 0.05);
+  --shadow-md: 0 2px 8px rgba(60, 50, 40, 0.07);
+  --shadow-lg: 0 4px 16px rgba(60, 50, 40, 0.1);
+
+  /* 字体族
+     注：标题曾用西文衬线栈（Georgia + Songti SC），但中文在 Windows 上
+     只能回落到宋体，渲染效果差。现统一用系统中文字体，标题靠 600 字重
+     和字距体现"展示感"，不再依赖衬线。 */
+  --font-serif: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, 'Courier New', monospace;
 }
 
 /* ============================================ */
-/* 2. 重置浏览器默认样式 */
+/* 2. Element Plus 主题变量覆盖（换肤核心） */
+/* ============================================ */
+:root {
+  /* 主色阶 */
+  --el-color-primary: #c96a4a;
+  --el-color-primary-dark-2: #a8532f;
+  --el-color-primary-light-3: #d88f77;
+  --el-color-primary-light-5: #e4b5a5;
+  --el-color-primary-light-7: #efd1c6;
+  --el-color-primary-light-8: #f5ded4;
+  --el-color-primary-light-9: #faede7;
+
+  /* 成功 */
+  --el-color-success: #5f8f5a;
+  --el-color-success-dark-2: #4f7a4b;
+  --el-color-success-light-3: #87ac82;
+  --el-color-success-light-5: #afc7ab;
+  --el-color-success-light-7: #d3e2d1;
+  --el-color-success-light-8: #e2eddf;
+  --el-color-success-light-9: #f0f6ee;
+
+  /* 警告 */
+  --el-color-warning: #dda15e;
+  --el-color-warning-dark-2: #c08340;
+  --el-color-warning-light-3: #e7ba8a;
+  --el-color-warning-light-5: #eed0af;
+  --el-color-warning-light-7: #f4e2cb;
+  --el-color-warning-light-8: #f8ecdb;
+  --el-color-warning-light-9: #fbf5ea;
+
+  /* 危险 / 错误 */
+  --el-color-danger: #be4b40;
+  --el-color-danger-dark-2: #a03b31;
+  --el-color-danger-light-3: #d07c72;
+  --el-color-danger-light-5: #dfa9a2;
+  --el-color-danger-light-7: #ebc7c2;
+  --el-color-danger-light-8: #f2d9d5;
+  --el-color-danger-light-9: #f9ece9;
+  --el-color-error: #be4b40;
+  --el-color-error-dark-2: #a03b31;
+  --el-color-error-light-3: #d07c72;
+  --el-color-error-light-5: #dfa9a2;
+  --el-color-error-light-7: #ebc7c2;
+  --el-color-error-light-8: #f2d9d5;
+  --el-color-error-light-9: #f9ece9;
+
+  /* 信息 */
+  --el-color-info: #8a837b;
+  --el-color-info-dark-2: #6f6962;
+  --el-color-info-light-3: #aba59d;
+  --el-color-info-light-5: #c5c0b9;
+  --el-color-info-light-7: #ddd9d2;
+  --el-color-info-light-8: #e8e5df;
+  --el-color-info-light-9: #f3f1ec;
+
+  /* 中性色：文字 / 边框 / 填充（全部换成暖灰系） */
+  --el-text-color-primary: #1f1c19;
+  --el-text-color-regular: #57504a;
+  --el-text-color-secondary: #8a837b;
+  --el-text-color-placeholder: #b4ada3;
+  --el-text-color-disabled: #c7c0b6;
+
+  --el-border-color: #ded9cf;
+  --el-border-color-light: #e8e4dc;
+  --el-border-color-lighter: #efebe3;
+  --el-border-color-extra-light: #f5f2ec;
+
+  --el-fill-color: #f0ede6;
+  --el-fill-color-light: #f5f2ec;
+  --el-fill-color-lighter: #faf8f3;
+  --el-fill-color-extra-light: #fcfbf8;
+  --el-fill-color-dark: #e8e4dc;
+  --el-fill-color-darker: #ded9cf;
+
+  --el-bg-color: #ffffff;
+  --el-bg-color-page: #faf9f5;
+  --el-bg-color-overlay: #ffffff;
+
+  /* 圆角 */
+  --el-border-radius-base: 6px;
+  --el-border-radius-small: 4px;
+  --el-border-radius-round: 20px;
+
+  /* 表格：暖纸表头 + 细边框 */
+  --el-table-header-bg-color: #f5f2ec;
+  --el-table-header-text-color: #57504a;
+  --el-table-row-hover-bg-color: #f7f4ee;
+  --el-table-tr-bg-color: #ffffff;
+  --el-table-border-color: #efebe3;
+
+  /* 卡片 */
+  --el-card-border-color: #e8e4dc;
+  --el-card-border-radius: 10px;
+  --el-card-padding: 20px;
+
+  /* 遮罩（弹窗背景稍暖） */
+  --el-overlay-color-lighter: rgba(31, 28, 25, 0.5);
+}
+
+/* ============================================ */
+/* 3. 重置浏览器默认样式 */
 /* ============================================ */
 * {
   margin: 0;
@@ -60,7 +181,7 @@
 html, body {
   width: 100%;
   height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
   font-size: 14px;
   color: var(--text-primary);
   background-color: var(--bg-color);
@@ -72,7 +193,34 @@ html, body {
 }
 
 /* ============================================ */
-/* 3. 通用工具类 */
+/* 4. Element Plus 组件细节打磨（全局，非 scoped） */
+/* ============================================ */
+
+/* 卡片：细边框 + 极轻暖影，纸感 */
+.el-card {
+  border: 1px solid var(--el-card-border-color);
+  box-shadow: var(--shadow-sm);
+  color: var(--text-primary);
+}
+
+.el-card__header {
+  border-bottom-color: var(--el-border-color-lighter);
+}
+
+/* 表头文字稍加重，有"台账"感 */
+.el-table th.el-table__cell {
+  font-weight: 600;
+}
+
+/* 弹窗圆角统一 */
+.el-dialog {
+  border-radius: 10px;
+}
+
+/* 主按钮 hover 由 --el-color-primary-light-3 驱动，无需额外覆盖 */
+
+/* ============================================ */
+/* 5. 通用工具类 */
 /* ============================================ */
 
 /* 文字对齐 */
@@ -106,8 +254,14 @@ html, body {
 .text-warning { color: var(--warning-color); }
 .text-danger { color: var(--danger-color); }
 
+/* 页面大标题（衬线，paper 感）— 各页面可选用 */
+.page-title-serif {
+  font-family: var(--font-serif);
+  letter-spacing: 0.02em;
+}
+
 /* ============================================ */
-/* 4. 滚动条样式 */
+/* 6. 滚动条样式（暖灰） */
 /* ============================================ */
 ::-webkit-scrollbar {
   width: 6px;
@@ -115,31 +269,32 @@ html, body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f1f1;
+  background: #f5f2ec;
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
+  background: #d5cfc4;
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
+  background: #b8b0a2;
 }
 
 /* ============================================ */
-/* 5. 卡片通用样式 */
+/* 7. 卡片通用样式 */
 /* ============================================ */
 .card {
   background: var(--bg-white);
-  border-radius: var(--border-radius-md);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-lg);
   box-shadow: var(--shadow-sm);
   padding: var(--spacing-lg);
 }
 
 /* ============================================ */
-/* 6. 过渡动画 */
+/* 8. 过渡动画 */
 /* ============================================ */
 .fade-enter-active,
 .fade-leave-active {
@@ -149,4 +304,71 @@ html, body {
 .fade-enter-from,
 .fade-leave-to {
   opacity: 0;
+}
+
+/* ============================================ */
+/* 9. 第二轮深化：全局细节打磨 */
+/* ============================================ */
+
+/* 选中文字：赤陶浅底 */
+::selection {
+  background: #f5ded4;
+  color: #1f1c19;
+}
+
+/* 表头：小字 + 字距，"台账"感 */
+.el-table th.el-table__cell {
+  font-size: 12px;
+  letter-spacing: 0.05em;
+}
+
+/* 标签：药丸形 */
+.el-tag {
+  border-radius: 999px;
+}
+
+/* 按钮字重统一 */
+.el-button {
+  font-weight: 500;
+}
+
+/* 弹窗标题：衬线 */
+.el-dialog__title {
+  font-family: var(--font-serif);
+  font-weight: 600;
+  font-size: 17px;
+}
+
+/* 输入框聚焦：赤陶浅晕 */
+.el-input__wrapper.is-focus {
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset, 0 0 0 3px rgba(201, 106, 74, 0.14);
+}
+
+/* ============================================ */
+/* 10. 表格精修：更通透的行距与发丝线 */
+/* ============================================ */
+.el-table {
+  --el-table-border-color: #f0ece4;
+  font-size: 13px;
+  color: var(--text-regular);
+}
+
+/* 行高放宽，别挤 */
+.el-table .el-table__cell {
+  padding: 13px 0;
+}
+
+/* 单元格行距 */
+.el-table .cell {
+  line-height: 1.5;
+}
+
+/* 表头下缘一条明确的发丝线 */
+.el-table th.el-table__cell {
+  border-bottom: 1px solid #e8e4dc;
+}
+
+/* 表格外圆角（配合卡片） */
+.el-table__inner-wrapper {
+  border-radius: 8px;
 }

@@ -116,21 +116,24 @@ async function scrollToBottom() {
 
 <style scoped>
 .page {
-  padding: 20px;
+  padding: 24px;
   max-width: 900px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  height: calc(100vh - 40px);
+  height: calc(100vh - 48px);
 }
 
 .page h3 {
   margin: 0 0 4px 0;
-  font-size: 20px;
+  font-size: 22px;
+  font-family: var(--font-serif);
+  font-weight: 600;
+  color: #1f1c19;
 }
 
 .desc {
-  color: #909399;
+  color: #8a837b;
   font-size: 13px;
   margin: 0 0 16px 0;
 }
@@ -140,14 +143,14 @@ async function scrollToBottom() {
   overflow-y: auto;
   padding: 16px;
   background: #fff;
-  border-radius: 8px;
-  border: 1px solid #e4e7ed;
+  border-radius: 10px;
+  border: 1px solid #e8e4dc;
 }
 
 .welcome {
   text-align: center;
   padding: 40px 0;
-  color: #606266;
+  color: #57504a;
 }
 
 .quick-list {
@@ -169,26 +172,40 @@ async function scrollToBottom() {
 }
 
 .msg-avatar {
-  font-size: 24px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  background: #f5f2ec;
+  border: 1px solid #e8e4dc;
   flex-shrink: 0;
+}
+
+.msg-user .msg-avatar {
+  background: #faede7;
+  border-color: #f5ded4;
 }
 
 .msg-bubble {
   max-width: 75%;
   padding: 12px 16px;
-  border-radius: 12px;
+  border-radius: 14px;
   line-height: 1.6;
 }
 
 .msg-user .msg-bubble {
-  background: #409eff;
-  color: white;
+  background: #c96a4a;
+  color: #fff7f2;
   border-bottom-right-radius: 4px;
 }
 
 .msg-bot .msg-bubble {
-  background: #f4f4f5;
-  color: #303133;
+  background: #f5f2ec;
+  border: 1px solid #efebe3;
+  color: #1f1c19;
   border-bottom-left-radius: 4px;
 }
 
@@ -201,7 +218,7 @@ async function scrollToBottom() {
 }
 
 .loading-bubble {
-  color: #909399;
+  color: #8a837b;
 }
 
 .dot-anim::after {

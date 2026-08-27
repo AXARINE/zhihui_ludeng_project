@@ -90,9 +90,38 @@ onMounted(loadCommands)
 </template>
 
 <style scoped>
-.command-log-page { padding: 20px; }
-.page-header { margin-bottom: 20px; }
-.page-header h2 { margin: 0 0 8px; font-size: 24px; color: #333; }
-.page-header p { margin: 0; color: #666; }
+.command-log-page { padding: 24px; }
+.page-header {
+  margin-bottom: 20px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #efebe3;
+}
+.page-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+  font-size: 24px;
+  font-family: var(--font-serif);
+  font-weight: 600;
+  color: #1f1c19;
+}
+.page-header h2::before {
+  content: '';
+  width: 4px;
+  height: 0.95em;
+  background: #c96a4a;
+  border-radius: 2px;
+}
+.page-header p { margin: 0; color: #8a837b; }
 .filter-card { margin-bottom: 20px; }
+
+/* 筛选控件宽度 + 单行紧凑 */
+.filter-card .el-input {
+  width: 200px;
+}
+
+.filter-card .el-form-item {
+  margin-bottom: 0;
+}
 </style>

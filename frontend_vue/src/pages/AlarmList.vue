@@ -223,22 +223,37 @@ onMounted(() => {
 
 <style scoped>
 .alarm-list-page {
-  padding: 20px;
+  padding: 24px;
 }
 
 .page-header {
   margin-bottom: 20px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #efebe3;
 }
 
 .page-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0 0 8px 0;
   font-size: 24px;
-  color: #333;
+  font-family: var(--font-serif);
+  font-weight: 600;
+  color: #1f1c19;
+}
+
+.page-header h2::before {
+  content: '';
+  width: 4px;
+  height: 0.95em;
+  background: #c96a4a;
+  border-radius: 2px;
 }
 
 .page-header p {
   margin: 0;
-  color: #666;
+  color: #8a837b;
 }
 
 .alarm-stats {
@@ -253,27 +268,37 @@ onMounted(() => {
 }
 
 .stat-value {
-  font-size: 32px;
-  font-weight: bold;
-  color: #333;
+  font-size: 30px;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: #1f1c19;
 }
 
 .stat-label {
-  font-size: 14px;
-  color: #666;
-  margin-top: 4px;
+  font-size: 13px;
+  color: #8a837b;
+  margin-top: 6px;
 }
 
 .stat-card.pending .stat-value {
-  color: #f56c6c;
+  color: #be4b40;
 }
 
 .stat-card.resolved .stat-value {
-  color: #67c23a;
+  color: #5f8f5a;
 }
 
 .filter-card {
   margin-bottom: 20px;
+}
+
+/* 筛选控件：默认宽度太窄，选中项显示不下 */
+.filter-card .el-select {
+  width: 180px;
+}
+
+.filter-card .el-form-item {
+  margin-bottom: 0;
 }
 
 .table-card {
@@ -281,6 +306,6 @@ onMounted(() => {
 }
 
 .pending-text {
-  color: #999;
+  color: #b4ada3;
 }
 </style>

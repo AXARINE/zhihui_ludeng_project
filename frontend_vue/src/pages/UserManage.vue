@@ -304,23 +304,39 @@ function getRoleTagType(roleCode) {
 
 .page-header {
   margin-bottom: 20px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid #efebe3;
 }
 
 .page-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0 0 4px 0;
-  font-size: 20px;
-  color: #303133;
+  font-size: 24px;
+  font-family: var(--font-serif);
+  font-weight: 600;
+  color: #1f1c19;
+}
+
+.page-header h2::before {
+  content: '';
+  width: 4px;
+  height: 0.95em;
+  background: #c96a4a;
+  border-radius: 2px;
 }
 
 .page-header .desc {
   margin: 0;
   font-size: 14px;
-  color: #909399;
+  color: #8a837b;
 }
 
 .card-title {
   font-weight: 600;
   font-size: 15px;
+  color: #1f1c19;
 }
 
 .create-form {

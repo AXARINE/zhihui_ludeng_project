@@ -212,7 +212,7 @@ onMounted(() => {
 
 <style scoped>
 .device-detail-page {
-  padding: 20px;
+  padding: 24px;
 }
 
 .back-button {
@@ -232,15 +232,18 @@ onMounted(() => {
 .card-header h3 {
   margin: 0;
   font-size: 20px;
+  font-family: var(--font-serif);
+  font-weight: 600;
+  color: #1f1c19;
 }
 
 .lamp-on {
-  color: #ff9800;
-  font-weight: bold;
+  color: #c08340;
+  font-weight: 600;
 }
 
 .lamp-off {
-  color: #9e9e9e;
+  color: #a8a29c;
 }
 
 .not-found {
@@ -250,12 +253,12 @@ onMounted(() => {
 
 .not-found h3 {
   margin-bottom: 10px;
-  color: #f56c6c;
+  color: #be4b40;
 }
 
 .not-found p {
   margin-bottom: 20px;
-  color: #666;
+  color: #8a837b;
 }
 
 .control-card {
@@ -275,7 +278,7 @@ onMounted(() => {
 .chart-placeholder {
   text-align: center;
   padding: 40px;
-  color: #666;
+  color: #8a837b;
 }
 
 .chart-placeholder p {
