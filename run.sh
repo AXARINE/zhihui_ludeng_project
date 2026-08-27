@@ -13,8 +13,8 @@
 #
 # 注意     : 本脚本仅供 Windows 侧使用,WSL 内请走标准工作流:
 #              cd ~/bearpi/smart-street-light/backend
-#              ./infra-up.sh                             # 只起数据库(WSL 原生 docker)
-#              set -a && . ./.env && set +a && cargo run # 起后端
+#              ./dev.sh db    # 只起数据库(WSL 原生 docker)
+#              ./dev.sh run   # 起后端
 # ============================================================
 set -e
 cd "$(dirname "$0")/backend"

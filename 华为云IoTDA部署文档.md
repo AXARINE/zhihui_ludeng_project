@@ -132,8 +132,8 @@ vim .env
 
 ```bash
 cd backend
-./infra-up.sh                      # 只起 PostgreSQL 容器(streetlight-postgres)
-set -a && . ./.env && set +a && cargo run   # 监听 8080,首次启动自动建表 + 创建引导管理员
+./dev.sh db                        # 只起 PostgreSQL 容器(streetlight-postgres)
+./dev.sh run                       # 加载 .env 并启动;监听 8080,首次启动自动建表 + 创建引导管理员
 ```
 
 浏览器打开 `http://127.0.0.1:8080/docs`(Swagger UI):`POST /api/auth/login` 拿 token → 右上角 Authorize 填 `Bearer <token>` → 在线调试全部接口。
@@ -163,6 +163,8 @@ docker compose up -d --build
 docker compose ps
 docker logs -f streetlight-backend
 ```
+
+之后更新后端代码:`cd backend && ./dev.sh update`(git pull --ff-only → 重建 backend 容器 → 等待健康检查,数据库等其他服务不动)。
 
 看到 `database migrated` 与 `http listening on 0.0.0.0:8080` 即成功;首次启动自动建表并创建引导管理员。
 
