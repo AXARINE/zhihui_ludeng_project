@@ -123,9 +123,26 @@ struct ShadowService {
     reported: Reported,
 }
 
+/// 影子查询结果:Light 服务上报属性 + 平台事件时间(在线心跳源)
+pub struct ShadowReport {
+    pub props: ShadowProps,
+    /// `IoTDA` 平台接收上报时打的时间戳(`yyyyMMdd'T'HHmmss'Z'`),解析失败为 None
+    pub event_time: Option<chrono::DateTime<chrono::Utc>>,
+}
+
 #[derive(serde::Deserialize)]
 struct Reported {
     properties: ShadowProps,
+    #[serde(default)]
+    event_time: Option<String>,
+}
+
+/// 解析 `IoTDA` 事件时间(格式 `yyyyMMdd'T'HHmmss'Z'`,如 `20260826T103000Z`),
+/// 非法串返回 None(调用方按不去重、不刷新心跳处理)
+pub fn parse_event_time(raw: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::NaiveDateTime::parse_from_str(raw, "%Y%m%dT%H%M%SZ")
+        .ok()
+        .map(|dt| dt.and_utc())
 }
 
 #[derive(serde::Deserialize)]
@@ -295,14 +312,21 @@ impl IothubClient {
         Err(last_err.expect("循环至少执行一次"))
     }
 
-    /// 查询设备影子,返回 Light 服务上报的属性
+    /// 查询设备影子,返回 Light 服务上报的属性与平台事件时间(心跳源)
     pub async fn shadow(
         &self,
         device_id: &str,
-    ) -> anyhow::Result<Option<ShadowProps>> {
+    ) -> anyhow::Result<Option<ShadowReport>> {
         if self.dry_run {
             tracing::debug!("dry-run: shadow({device_id}) stubbed");
-            return Ok(None);
+            // 心跳保鲜:维持 dry-run "设备固定 Online、不产生离线告警"的约定
+            return Ok(Some(ShadowReport {
+                props: ShadowProps {
+                    luminance: None,
+                    light_status: None,
+                },
+                event_time: Some(chrono::Utc::now()),
+            }));
         }
         let resp = self
             .request(
@@ -317,7 +341,14 @@ impl IothubClient {
             .shadow
             .into_iter()
             .find(|s| s.service_id == "Light")
-            .map(|s| s.reported.properties))
+            .map(|s| ShadowReport {
+                props: s.reported.properties,
+                event_time: s
+                    .reported
+                    .event_time
+                    .as_deref()
+                    .and_then(parse_event_time),
+            }))
     }
 
     /// 查询设备在线状态
@@ -444,6 +475,51 @@ pub fn sign_derived(
     )
 }
 
+/// 失联判定窗口(秒):心跳(`last_seen_at` = 最后一条上报的平台事件时间)
+/// 超过该窗口未前进,即使 `IoTDA` 状态 API 仍报 ONLINE 也本地标记离线。
+/// 本地失联检测与"转在线门控"(见 `apply_online_status`)共用此常量。
+pub const OFFLINE_TIMEOUT_SECS: i64 = 90;
+
+/// 本地失联检测(与 `IoTDA` 状态 API 解耦):心跳超过 `OFFLINE_TIMEOUT_SECS`
+/// 未前进的在线设备直接标记离线并产生告警(去重),不等待 MQTT 超时判定。
+/// 返回本次被标记离线的设备 id。
+async fn mark_stale_devices_offline(db: &sqlx::PgPool) -> Vec<String> {
+    let newly_offline: Vec<(String,)> = match sqlx::query_as(
+        "UPDATE device SET status='offline' \
+         WHERE status='online' \
+         AND last_seen_at < now() - $1 * interval '1 second' \
+         RETURNING id",
+    )
+    .bind(OFFLINE_TIMEOUT_SECS)
+    .fetch_all(db)
+    .await
+    {
+        Ok(ids) => ids,
+        Err(e) => {
+            tracing::error!("local timeout check failed: {e}");
+            return Vec::new();
+        }
+    };
+    for (device_id,) in &newly_offline {
+        tracing::warn!("device {device_id} offline (local timeout)");
+        // 产生离线告警(避免重复)
+        if let Err(e) = sqlx::query(
+            "INSERT INTO alarm (device_id, type, message) \
+             SELECT $1, 'offline', '设备离线' \
+             WHERE NOT EXISTS ( \
+                 SELECT 1 FROM alarm \
+                 WHERE device_id=$1 AND type='offline' AND resolved_at IS NULL)",
+        )
+        .bind(device_id)
+        .execute(db)
+        .await
+        {
+            tracing::error!("insert offline alarm for {device_id} failed: {e}");
+        }
+    }
+    newly_offline.into_iter().map(|(id,)| id).collect()
+}
+
 /// 轮询任务:周期性并发拉取各设备影子/状态入库
 pub async fn run(state: AppState, iothub: Arc<IothubClient>) {
     // 轮询间隔可用 IOTDA_POLL_INTERVAL_SECS 覆盖,未设置/非法/为 0 时默认 8 秒
@@ -459,32 +535,7 @@ pub async fn run(state: AppState, iothub: Arc<IothubClient>) {
     loop {
         ticker.tick().await;
 
-        // 本地超时检测: 90 秒未更新 last_seen_at 的设备直接标记离线
-        // 不依赖 IoTDA 的 device_status API（MQTT keepalive 超时 60-120 秒太慢）
-        let newly_offline: Vec<(String,)> = sqlx::query_as(
-            "UPDATE device SET status='offline' \
-             WHERE status='online' \
-             AND last_seen_at < now() - interval '90 seconds' \
-             RETURNING id",
-        )
-        .fetch_all(&state.db)
-        .await
-        .unwrap_or_default();
-
-        for (device_id,) in &newly_offline {
-            tracing::warn!("device {device_id} offline (local timeout)");
-            // 产生离线告警（避免重复）
-            let _ = sqlx::query(
-                "INSERT INTO alarm (device_id, type, message) \
-                 SELECT $1, 'offline', '设备离线' \
-                 WHERE NOT EXISTS ( \
-                     SELECT 1 FROM alarm \
-                     WHERE device_id=$1 AND type='offline' AND resolved_at IS NULL)",
-            )
-            .bind(device_id)
-            .execute(&state.db)
-            .await;
-        }
+        mark_stale_devices_offline(&state.db).await;
 
         let devices: Vec<(String,)> =
             match sqlx::query_as("SELECT id FROM device")
@@ -514,20 +565,41 @@ pub async fn run(state: AppState, iothub: Arc<IothubClient>) {
 }
 
 /// 应用设备在线状态(轮询与后续 webhook 推送共用):
-/// 状态翻转时更新 `device.status` 并产生/消解离线告警;在线时刷新 `last_seen_at`
+/// 状态翻转时更新 `device.status` 并产生/消解离线告警。
+///
+/// 心跳约定:`last_seen_at` 只由数据上报刷新(`apply_shadow_props`),
+/// 不在这里刷新——状态观测(`device_status`)在设备断连后的 MQTT 宽限期
+/// (60-120s)内仍报 ONLINE,若用它刷新心跳,本地失联检测将永远抢不过它。
+///
+/// 转在线受心跳新鲜度门控:最近 `OFFLINE_TIMEOUT_SECS` 内无数据上报的设备
+/// 不翻回在线,避免本地标记离线后被宽限期的 ONLINE 观测反复翻回造成抖动。
 pub async fn apply_online_status(
     db: &sqlx::PgPool,
     device_id: &str,
     online: bool,
 ) -> anyhow::Result<()> {
     // 在线状态变化 → 告警产生/消解
-    let changed: Option<(String,)> = sqlx::query_as(
-        "UPDATE device SET status=$2 WHERE id=$1 AND status!=$2 RETURNING id",
-    )
-    .bind(device_id)
-    .bind(if online { "online" } else { "offline" })
-    .fetch_optional(db)
-    .await?;
+    let changed: Option<(String,)> = if online {
+        sqlx::query_as(
+            "UPDATE device SET status='online' \
+             WHERE id=$1 AND status!='online' \
+             AND last_seen_at > now() - $2 * interval '1 second' \
+             RETURNING id",
+        )
+        .bind(device_id)
+        .bind(OFFLINE_TIMEOUT_SECS)
+        .fetch_optional(db)
+        .await?
+    } else {
+        sqlx::query_as(
+            "UPDATE device SET status='offline' \
+             WHERE id=$1 AND status!='offline' \
+             RETURNING id",
+        )
+        .bind(device_id)
+        .fetch_optional(db)
+        .await?
+    };
     if changed.is_some() {
         if online {
             sqlx::query(
@@ -547,26 +619,34 @@ pub async fn apply_online_status(
             .await?;
         }
     }
-    if online {
-        sqlx::query("UPDATE device SET last_seen_at=now() WHERE id=$1")
-            .bind(device_id)
-            .execute(db)
-            .await?;
-    }
     Ok(())
 }
 
 /// 影子属性入库(轮询与后续 webhook 推送共用):光照写入历史库,灯态更新到设备表。
-/// `recorded_at` 为 None 时 `created_at` 用数据库默认 now();为 Some 时显式写入,
-/// 并按 (`device_id`, `created_at`) 去重(webhook 重复推送不产生重复行)
+/// `data_time` 为 None 时 `created_at` 用数据库默认 now();为 Some 时显式写入,
+/// 并按 (`device_id`, `created_at`) 去重(webhook 重复推送不产生重复行)。
+///
+/// 心跳:`data_time`(`IoTDA` 平台事件时间)同时刷新 `last_seen_at`,且只前进不回拨
+/// ——设备断连后影子保留旧值、事件时间冻结,乱序/迟到的旧事件也不会误刷心跳,
+/// 这是本地失联检测(90s)能在 MQTT 超时之前生效的前提。
 pub async fn apply_shadow_props(
     db: &sqlx::PgPool,
     device_id: &str,
     props: &ShadowProps,
-    recorded_at: Option<chrono::DateTime<chrono::Utc>>,
+    data_time: Option<chrono::DateTime<chrono::Utc>>,
 ) -> anyhow::Result<()> {
+    if let Some(ts) = data_time {
+        sqlx::query(
+            "UPDATE device SET last_seen_at=$2 \
+             WHERE id=$1 AND (last_seen_at IS NULL OR last_seen_at < $2)",
+        )
+        .bind(device_id)
+        .bind(ts)
+        .execute(db)
+        .await?;
+    }
     if let Some(lux) = props.luminance {
-        if let Some(ts) = recorded_at {
+        if let Some(ts) = data_time {
             sqlx::query(
                 "INSERT INTO lux_record (device_id, lux, created_at) SELECT $1, $2, $3 \
                  WHERE NOT EXISTS ( \
@@ -611,9 +691,63 @@ async fn poll_device(
         return Ok(());
     }
 
-    // 影子属性 → 历史库 + 灯态
-    if let Some(props) = iothub.shadow(device_id).await? {
-        apply_shadow_props(&state.db, device_id, &props, None).await?;
+    // 影子属性 → 历史库 + 灯态 + 心跳(平台事件时间)
+    if let Some(report) = iothub.shadow(device_id).await? {
+        apply_shadow_props(&state.db, device_id, &report.props, report.event_time)
+            .await?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 影子响应的 Light 服务带 event_time:属性与平台事件时间(心跳源)都能解析
+    #[test]
+    fn shadow_response_with_event_time() {
+        let json = serde_json::json!({
+            "device_id": "dev001",
+            "shadow": [{
+                "service_id": "Light",
+                "reported": {
+                    "properties": { "Luminance": 350, "LightStatus": "on" },
+                    "event_time": "20260826T103000Z"
+                }
+            }]
+        });
+        let resp: ShadowResponse = serde_json::from_value(json).unwrap();
+        let svc = resp
+            .shadow
+            .into_iter()
+            .find(|s| s.service_id == "Light")
+            .unwrap();
+        assert_eq!(svc.reported.properties.luminance, Some(350));
+        assert_eq!(
+            svc.reported.event_time.as_deref().and_then(parse_event_time),
+            Some(
+                chrono::DateTime::parse_from_rfc3339("2026-08-26T10:30:00Z")
+                    .unwrap()
+                    .with_timezone(&chrono::Utc)
+            )
+        );
+    }
+
+    /// 影子响应缺 event_time:属性照常解析,心跳时间为 None(不刷新 last_seen_at)
+    #[test]
+    fn shadow_response_without_event_time() {
+        let json = serde_json::json!({
+            "shadow": [{
+                "service_id": "Light",
+                "reported": { "properties": { "Luminance": 350 } }
+            }]
+        });
+        let resp: ShadowResponse = serde_json::from_value(json).unwrap();
+        let svc = resp
+            .shadow
+            .into_iter()
+            .find(|s| s.service_id == "Light")
+            .unwrap();
+        assert!(svc.reported.event_time.is_none());
+    }
 }

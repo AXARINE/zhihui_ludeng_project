@@ -16,8 +16,6 @@ chrono = { version = "0.4", features = ["serde"] }
 futures = "0.3"
 hex = "0.4"
 hmac = "0.13"
-# v11 起必须显式选加密后端:rust_crypto 纯 Rust 实现,
-# 不依赖 aws-lc 的原生构建工具链(Docker rust 镜像无 cmake)
 jsonwebtoken = { version = "11", features = ["rust_crypto"] }
 regex = "1"
 reqwest = { version = "0.13", default-features = false, features = ["json", "rustls"] }

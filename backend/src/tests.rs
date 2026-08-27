@@ -363,11 +363,11 @@ fn webhook_event_time_parse() {
         DateTime::parse_from_rfc3339("2026-08-26T10:30:00Z")
             .unwrap()
             .with_timezone(&Utc);
-    assert_eq!(webhook::parse_event_time("20260826T103000Z"), Some(expect));
-    // 非法串/格式不符 → None(调用方按不去重处理)
-    assert_eq!(webhook::parse_event_time("garbage"), None);
-    assert_eq!(webhook::parse_event_time("2026-08-26T10:30:00Z"), None);
-    assert_eq!(webhook::parse_event_time(""), None);
+    assert_eq!(iothub::parse_event_time("20260826T103000Z"), Some(expect));
+    // 非法串/格式不符 → None(调用方按不去重、不刷新心跳处理)
+    assert_eq!(iothub::parse_event_time("garbage"), None);
+    assert_eq!(iothub::parse_event_time("2026-08-26T10:30:00Z"), None);
+    assert_eq!(iothub::parse_event_time(""), None);
 }
 
 #[test]

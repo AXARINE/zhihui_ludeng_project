@@ -8,7 +8,7 @@
 //! 解析失败/设备未注册/入库失败一律只记日志,不影响响应码。
 
 use crate::AppState;
-use crate::iothub::{self, OnlineStatus, ShadowProps};
+use crate::iothub::{self, OnlineStatus, ShadowProps, parse_event_time};
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::post;
@@ -34,14 +34,6 @@ pub enum NotifyEvent {
     },
     /// 在线状态变化(device.status)
     Status { device_id: String, online: bool },
-}
-
-/// 解析 `IoTDA` 事件时间(格式 `yyyyMMdd'T'HHmmss'Z'`,如 `20260826T103000Z`),
-/// 非法串返回 None(调用方按不去重处理)
-pub fn parse_event_time(raw: &str) -> Option<DateTime<Utc>> {
-    chrono::NaiveDateTime::parse_from_str(raw, "%Y%m%dT%H%M%SZ")
-        .ok()
-        .map(|dt| dt.and_utc())
 }
 
 /// 按顶层 `resource` 字段分发解析推送体(纯函数,便于单测)
@@ -86,7 +78,10 @@ async fn handle_event(
         } => {
             if device_registered(db, &device_id).await? {
                 iothub::apply_shadow_props(db, &device_id, &props, event_time)
-                    .await
+                    .await?;
+                // 真实上报即活性证据:直接翻回在线,不等下一个轮询 tick
+                // (轮询间隔 60s 时恢复延迟可达 60s;门控保证心跳新鲜才生效)
+                iothub::apply_online_status(db, &device_id, true).await
             } else {
                 tracing::debug!("IoTDA 属性上报忽略:设备 {device_id} 未注册");
                 Ok(())

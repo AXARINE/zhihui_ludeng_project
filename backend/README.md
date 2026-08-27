@@ -572,20 +572,27 @@ string_to_sign = "V11-HMAC-SHA256\n{sdk_date}\n{info}\n{sha256(canonical_request
 
 ```
 每 8s：
+  0. 本地失联检测：心跳 last_seen_at（= 最后一条数据上报的 IoTDA 平台事件时间）
+     超过 90s 未前进的在线设备直接标记离线并产生离线告警（去重），
+     不等 IoTDA 的 MQTT 超时判定（60-120s，太慢）
   SELECT id FROM device
   → 对每台设备并发执行 poll_device（`for_each_concurrent(8)`，并发上限 8，避免设备多时同时打出几十个 HTTPS 请求）：
       1. device_status：在线？
       2. UPDATE device.status；状态发生变化时：
-         在线 → 自动消解该设备未处理的 offline 告警
+         在线 → 自动消解该设备未处理的 offline 告警（受心跳新鲜度门控，见下）
          离线 → 插入一条 offline 告警
-      3. 离线 → 直接返回（不更新 last_seen_at、不读影子）
-      4. 在线 → 更新 last_seen_at = now()
-      5. 读影子 Light 服务：
+      3. 离线 → 直接返回（不读影子）
+      4. 在线 → 读影子 Light 服务：
          Luminance  → INSERT lux_record
          LightStatus → UPDATE device.lamp（转小写）
+         event_time → 心跳：单调前进 last_seen_at（乱序/迟到的旧事件不回拨）
 ```
 
-关键设计：**只在设备 ONLINE 时读影子入库**。设备离线后影子仍保留最后一次上报值，直接入库会持续写入假光照数据。
+关键设计：
+
+- **只在设备 ONLINE 时读影子入库**。设备离线后影子仍保留最后一次上报值，直接入库会持续写入假光照数据；断连后影子的 event_time 是冻结的，因此心跳也不会被旧影子误刷。
+- **在线状态由两条信号共同决定**：IoTDA 状态 API 报 ONLINE 且 90s 内有数据上报（心跳新鲜）才翻回在线。设备断连后 MQTT 宽限期（60-120s）内 API 仍报 ONLINE，门控挡住"翻回在线→再超时"的抖动与告警风暴。
+- 心跳由数据上报驱动（webhook 属性推送与轮询影子共用 `apply_shadow_props`），不由状态观测驱动——否则本地失联检测会被同一个慢信号持续刷新而失效。
 
 ### 7.5 维护智能问答（assistant.rs）
 
