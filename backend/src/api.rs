@@ -51,7 +51,24 @@ impl IntoResponse for Error {
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::Conflict(_) => StatusCode::CONFLICT,
         };
-        (status, self.to_string()).into_response()
+        // 内部错误的细节(约束名/表结构、华为云响应内容等)只进日志,
+        // 响应体固定为通用文案,避免泄露给外部调用方
+        let msg = match &self {
+            Self::Db(e) => {
+                tracing::error!("database error: {e}");
+                "服务器内部错误".to_string()
+            }
+            Self::Internal(e) => {
+                tracing::error!("internal error: {e}");
+                "服务器内部错误".to_string()
+            }
+            Self::Iothub(e) => {
+                tracing::error!("IoTDA 北向调用失败: {e:#}");
+                "IoTDA 北向调用失败".to_string()
+            }
+            other => other.to_string(),
+        };
+        (status, msg).into_response()
     }
 }
 
@@ -191,6 +208,8 @@ pub struct CommandRecord {
     #[sqlx(try_from = "String")]
     pub status: CommandStatus,
     pub message: String,
+    /// 下发指令的操作者(`app_user.id`;0005 迁移前的老数据为 NULL)
+    pub operator_id: Option<i64>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -362,6 +381,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/alarms", get(list_alarms))
         .route("/api/alarms/{id}", patch(patch_alarm))
+        .route("/api/audit-logs", get(list_audit_logs))
         .route("/api/lux/latest", get(global_lux_latest))
         .route("/api/commands", get(list_global_commands))
         .route("/api/dashboard", get(dashboard))
@@ -395,6 +415,30 @@ pub fn parse_time_range(
 
 pub fn clamp_limit(limit: Option<i64>, default: i64, max: i64) -> i64 {
     limit.unwrap_or(default).clamp(1, max)
+}
+
+/// 审计流水:管理操作留痕(审计表见 `migrations/0005_audit.sql`)。
+/// 写入失败只记日志,绝不影响主流程
+pub async fn audit(
+    db: &sqlx::PgPool,
+    actor: Option<i64>,
+    action: &str,
+    target: &str,
+    detail: &str,
+) {
+    if let Err(e) = sqlx::query(
+        "INSERT INTO audit_log (actor_id, action, target, detail) \
+         VALUES ($1, $2, $3, $4)",
+    )
+    .bind(actor)
+    .bind(action)
+    .bind(target)
+    .bind(detail)
+    .execute(db)
+    .await
+    {
+        tracing::error!("审计写入失败({action} target={target}): {e}");
+    }
 }
 
 // ---------------- 健康检查(公开) ----------------
@@ -747,20 +791,23 @@ async fn set_lamp(
 ) -> Result<StatusCode, Error> {
     auth.require(&s, "control:manual").await?;
     let hub = s.iothub.as_ref().ok_or(Error::IothubUnavailable)?;
-    // 指令留痕:北向接受记 sent,失败记 failed(固件执行结果不回传,无法追踪)
+    // 指令留痕:北向接受记 sent,失败记 failed(固件执行结果不回传,无法追踪);
+    // operator_id 记录操作者(审计归因,0005 迁移)
     let result = hub.control_led(&id, body.action).await;
     let (status, message) = result.as_ref().map_or_else(
         |e| ("failed", e.to_string()),
         |()| ("sent", String::new()),
     );
     sqlx::query(
-        "INSERT INTO command_record (device_id, action, source, status, message) \
-         VALUES ($1, $2, 'manual', $3, $4)",
+        "INSERT INTO command_record \
+         (device_id, action, source, status, message, operator_id) \
+         VALUES ($1, $2, 'manual', $3, $4, $5)",
     )
     .bind(&id)
     .bind(body.action.to_string())
     .bind(status)
     .bind(message)
+    .bind(auth.user_id)
     .execute(&s.db)
     .await?;
     result?;
@@ -827,6 +874,14 @@ async fn put_threshold(
     .await?;
     let hub = s.iothub.as_ref().ok_or(Error::IothubUnavailable)?;
     hub.set_threshold(&id, body.threshold).await?;
+    audit(
+        &s.db,
+        Some(auth.user_id),
+        "config.threshold",
+        &id,
+        &format!("threshold={}", body.threshold),
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -884,7 +939,7 @@ async fn query_commands(
     let (from, to) = parse_time_range(q.from.as_deref(), q.to.as_deref())?;
     let limit = clamp_limit(q.limit, 500, 5000);
     let mut qb = sqlx::QueryBuilder::new(
-        "SELECT id, device_id, action, source, status, message, created_at \
+        "SELECT id, device_id, action, source, status, message, operator_id, created_at \
          FROM command_record WHERE 1=1",
     );
     // 路径参数优先于查询参数
@@ -988,6 +1043,59 @@ async fn patch_alarm(
     .await?
     .ok_or_else(|| Error::NotFound(format!("告警 {id} 不存在")))?;
     Ok(Json(row))
+}
+
+// ---------------- 审计流水 ----------------
+#[derive(Serialize, ToSchema, sqlx::FromRow)]
+pub struct AuditLog {
+    pub id: i64,
+    /// 操作者(`app_user.id`;系统行为为 NULL)
+    pub actor_id: Option<i64>,
+    pub action: String,
+    pub target: String,
+    pub detail: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Deserialize)]
+pub struct AuditQuery {
+    pub from: Option<String>,
+    pub to: Option<String>,
+    pub limit: Option<i64>,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/audit-logs",
+    params(
+        ("from" = Option<String>, Query, description = "RFC3339 起始时间"),
+        ("to" = Option<String>, Query, description = "RFC3339 结束时间"),
+        ("limit" = Option<i64>, Query, description = "返回条数(默认 500,最大 5000)")
+    ),
+    responses((status = 200, description = "审计流水(倒序)", body = Vec<AuditLog>)),
+    security(("bearer_auth" = []))
+)]
+async fn list_audit_logs(
+    State(s): State<AppState>,
+    auth: Auth,
+    Query(q): Query<AuditQuery>,
+) -> Result<Json<Vec<AuditLog>>, Error> {
+    auth.require(&s, "user:manage").await?;
+    let (from, to) = parse_time_range(q.from.as_deref(), q.to.as_deref())?;
+    let limit = clamp_limit(q.limit, 500, 5_000);
+    let mut qb = sqlx::QueryBuilder::new(
+        "SELECT id, actor_id, action, target, detail, created_at \
+         FROM audit_log WHERE 1=1",
+    );
+    if let Some(from) = from {
+        qb.push(" AND created_at >= ").push_bind(from);
+    }
+    if let Some(to) = to {
+        qb.push(" AND created_at <= ").push_bind(to);
+    }
+    qb.push(" ORDER BY created_at DESC, id DESC LIMIT ").push(limit);
+    let rows = qb.build_query_as::<AuditLog>().fetch_all(&s.db).await?;
+    Ok(Json(rows))
 }
 
 // ---------------- 仪表盘聚合 ----------------

@@ -28,6 +28,7 @@ use utoipa::OpenApi;
         api::list_global_commands,
         api::list_alarms,
         api::patch_alarm,
+        api::list_audit_logs,
         api::dashboard,
         api::assistant_ask,
         auth::login,

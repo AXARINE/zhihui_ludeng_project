@@ -76,6 +76,14 @@ Rust 后端(axum, 8080) --> PostgreSQL(Docker)
 3. 记录**项目 ID**(我的凭证 → 项目列表,选实例所在区域行)。
 4. ⚠️ **签名算法**:标准版/企业版实例的北向 API 必须使用 **V11-HMAC-SHA256 衍生签名**(后端已实现,`HUAWEI_IOTDA_REGION` 留空会自动从 endpoint 域名推断);若误用旧版 SDK-HMAC-SHA256,接口返回 401 IOTDA.000002,与 IAM 权限无关。
 
+### 3.5 数据转发(HTTP 推送,可选但公网推荐)
+
+推送为主、轮询兜底:设备上报与状态变化由 IoTDA 主动 POST 给后端,不再依赖 8s 轮询。
+
+1. 实例详情 → **数据转发** → 创建规则:转发内容勾选**设备属性变化**与**设备状态变化**,目标选 **HTTP 推送**,URL 填 `https://<公网域名>/api/iotda/callback`。
+2. **自定义 Header(鉴权,公网必配)**:加 `Authorization: Bearer <随机长字符串>`,与后端 `.env` 的 `IOTDA_WEBHOOK_TOKEN` 同值(`openssl rand -hex 32` 生成)。不配则回调接口不鉴权——知道路径即可伪造上报/离线告警,后端启动时会打 warn。
+3. 启用推送后把 `.env` 的 `IOTDA_POLL_INTERVAL_SECS` 设为 `60`(推送为主,轮询只兜底校准)。
+
 ## 4. 设备端固件部署
 
 ### 4.1 获取代码
@@ -126,6 +134,7 @@ vim .env
 | `HUAWEI_IOTDA_REGION` | 可选 | 如 `cn-south-1`;留空自动从 endpoint 推断 |
 | `DATABASE_URL` | ✅ | 本地直连模式用 `127.0.0.1`(compose 会覆盖为内部服务名) |
 | `JWT_SECRET` | ✅ | 生产必改:`openssl rand -hex 32` |
+| `IOTDA_WEBHOOK_TOKEN` | 公网必填 | 数据转发推送回调的共享 token;配置后回调要求 `Authorization: Bearer`(见 3.5),留空不鉴权(仅本地开发) |
 | `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD` | 建议 | 首次启动且账号表为空时创建管理员;默认 `admin/admin123` 仅开发用 |
 
 ### 5.2 本地开发模式(WSL)
@@ -192,6 +201,7 @@ sudo systemctl reload caddy
 
 - `JWT_SECRET` 必须替换为随机值;
 - `BOOTSTRAP_ADMIN_PASSWORD` 首次启动前设成强密码;上线后建议用 API 创建正式账号并删除默认 admin;
+- 启用数据转发推送时 `IOTDA_WEBHOOK_TOKEN` 必须配置并与 IoTDA 转发规则的自定义 Header 一致(见 3.5),否则回调接口无鉴权;
 - 前端与后端不同域名时,把 `backend/src/main.rs` 的 CORS `allow_origin(Any)` 改为前端域名(同域走 Caddy 则无需处理);
 - 安全组只放行 80/443,**不放行 5432/8080**。
 

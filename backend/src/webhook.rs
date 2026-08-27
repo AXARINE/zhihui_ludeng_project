@@ -1,10 +1,10 @@
 //! `IoTDA` 数据转发(HTTP 推送)回调入口,推送为主、轮询兜底校准。
 //!
-//! **本端点免 JWT、无认证(用户明确决策)**:知道路径即可伪造上报/状态数据。
-//! 云部署后建议在 `IoTDA` 转发规则上配置自定义 Header,此处再加
-//! `IOTDA_WEBHOOK_TOKEN` 校验(暂未实现,见部署文档)。
+//! **免 JWT**;鉴权靠可选的共享 token:配置 `IOTDA_WEBHOOK_TOKEN` 后,请求必须带
+//! `Authorization: Bearer <token>` 头(IoTDA 转发规则上配置同名自定义 Header),
+//! 否则一律 401;**未配置则不鉴权**(仅本地开发,公网部署必须配置,启动时有 warn)。
 //!
-//! 协议约定:任何情况下都尽快返回 200——`IoTDA` 超时未收到 200 会重推,
+//! 协议约定:鉴权通过后任何情况下都尽快返回 200——`IoTDA` 超时未收到 200 会重推,
 //! 解析失败/设备未注册/入库失败一律只记日志,不影响响应码。
 
 use crate::AppState;
@@ -45,16 +45,44 @@ pub fn parse_notification(v: &Value) -> Option<NotifyEvent> {
     }
 }
 
+/// 共享 token 校验:`expected` 为 None(未配置 `IOTDA_WEBHOOK_TOKEN`)时不鉴权放行;
+/// 已配置则要求 `Authorization: Bearer <token>` 完全匹配。等长逐字节比较,
+/// 不因前缀匹配程度差异产生时序泄露(不引 subtle crate,手写常数时间比较)
+pub fn token_ok(expected: Option<&str>, header: Option<&str>) -> bool {
+    let Some(expected) = expected else { return true };
+    let Some(provided) = header.and_then(|h| h.strip_prefix("Bearer ")) else {
+        return false;
+    };
+    let (a, b) = (expected.as_bytes(), provided.as_bytes());
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
 #[utoipa::path(
     post,
     path = "/api/iotda/callback",
     request_body(content = serde_json::Value, description = "IoTDA 数据转发推送原始 JSON"),
-    responses((status = 200, description = "已接收(解析失败/设备未注册同样返回 200,避免 IoTDA 重推)"))
+    responses(
+        (status = 200, description = "已接收(解析失败/设备未注册同样返回 200,避免 IoTDA 重推)"),
+        (status = 401, description = "共享 token 缺失或不匹配(仅配置了 IOTDA_WEBHOOK_TOKEN 时)")
+    )
 )]
 async fn iotda_callback(
     State(s): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(body): Json<Value>,
 ) -> StatusCode {
+    if !token_ok(
+        s.webhook_token.as_deref(),
+        headers
+            .get(axum::http::header::AUTHORIZATION)
+            .and_then(|v| v.to_str().ok()),
+    ) {
+        tracing::warn!("IoTDA 回调拒绝:共享 token 缺失或不匹配");
+        return StatusCode::UNAUTHORIZED;
+    }
     let Some(event) = parse_notification(&body) else {
         tracing::warn!("IoTDA 回调忽略(无法解析或不关心的 resource): {body}");
         return StatusCode::OK;

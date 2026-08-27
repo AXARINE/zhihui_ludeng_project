@@ -26,12 +26,49 @@ use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::net::{IpAddr, SocketAddr};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 use tokio::sync::{Mutex, Semaphore};
 use utoipa::ToSchema;
 
 const TOKEN_TTL_SECS: i64 = 24 * 60 * 60;
+
+/// 系统管理员角色代码(唯一硬编码的特殊角色:账号操作的越权守卫都围绕它,
+/// 见 `guard_super_admin`;其角色权限固定不可改的保护在 `update_role_permissions`)
+pub const SUPER_ADMIN: &str = "super_admin";
+
+/// 用户状态缓存 TTL:JWT 验签后的账号活性(存在/启用/当前角色)校验缓存,
+/// 禁用/删除/降权最迟在这个窗口内对已签发 token 生效
+const USER_CACHE_TTL: Duration = Duration::from_secs(30);
+
+/// 角色权限缓存 TTL:命中未过期免 SQL;过期重查回填,
+/// 兜底"经 nocodb/直接改库而不走 API"导致的缓存失效盲区(单实例部署前提不变)
+const PERM_CACHE_TTL: Duration = Duration::from_secs(60);
+
+/// 进程内缓存条目新鲜度判断(`user_cache` / `perm_cache` 共用)
+pub fn cache_entry_fresh(fetched_at: Instant, ttl: Duration) -> bool {
+    fetched_at.elapsed() < ttl
+}
+
+/// 用户状态缓存条目:JWT 验签通过后,授权以这里的**数据库当前值**为准,
+/// 而不是 token 签发时刻的 role 声明
+#[derive(Debug, Clone)]
+pub struct UserCacheEntry {
+    pub status: i16,
+    pub role_id: i64,
+    pub role_code: String,
+    pub fetched_at: Instant,
+}
+
+/// 用户状态缓存:`user_id` → 条目(30s TTL;`update_user`/`delete_user` 提交后主动失效)
+pub type UserCache = Arc<std::sync::RwLock<HashMap<i64, UserCacheEntry>>>;
+
+/// 登录时序抹平用的伪哈希:用户不存在时也拿它跑一次 Argon2 校验,
+/// 避免"用户名是否存在"从响应时间差泄露。首次登录请求时生成(一次性 ~几十 ms)
+static DUMMY_HASH: LazyLock<String> = LazyLock::new(|| {
+    hash_password("dummy-password-for-timing-equalization")
+        .expect("生成 dummy hash 失败")
+});
 
 /// Argon2id 默认参数(OWASP 推荐档):m=19456KiB, t=2, p=1。
 /// 部署时可用 `ARGON2_M_COST_KIB` / `ARGON2_T` / `ARGON2_P` 下调(低配机权衡),
@@ -100,9 +137,9 @@ pub struct Auth {
 impl Auth {
     /// 检查当前角色是否拥有指定权限码。
     ///
-    /// RBAC 映射运行时可改,但变更只经由 `update_role_permissions` 一处,故按 `role_id`
-    /// 做进程内缓存(命中即免一次 SQL;该接口提交后失效对应条目)。前提:单实例部署,
-    /// 多副本时外部直接改库不会触发失效。
+    /// RBAC 映射运行时可改,变更只经由 `update_role_permissions`(提交后失效对应条目),
+    /// 故按 `role_id` 做进程内缓存,命中且未过 `PERM_CACHE_TTL`(60s)即免一次 SQL;
+    /// TTL 兜底"绕过 API 直接改库"的场景(单实例部署前提,多副本需改 TTL 方案)。
     pub async fn require(
         &self,
         state: &AppState,
@@ -115,27 +152,32 @@ impl Auth {
             .expect("perm cache lock poisoned")
             .get(&self.role_id)
             .cloned();
-        let perms = if let Some(cached) = cached {
-            cached
-        } else {
-            let fresh: Arc<HashSet<String>> = Arc::new(
-                sqlx::query_scalar::<_, String>(
-                    "SELECT p.perm_code FROM permission p \
-                     JOIN role_permission rp ON rp.permission_id = p.id \
-                     WHERE rp.role_id = $1",
-                )
-                .bind(self.role_id)
-                .fetch_all(&state.db)
-                .await?
-                .into_iter()
-                .collect(),
-            );
-            state
-                .perm_cache
-                .write()
-                .expect("perm cache lock poisoned")
-                .insert(self.role_id, Arc::clone(&fresh));
-            fresh
+        let perms = match cached {
+            Some((perms, fetched_at))
+                if cache_entry_fresh(fetched_at, PERM_CACHE_TTL) =>
+            {
+                perms
+            }
+            _ => {
+                let fresh: Arc<HashSet<String>> = Arc::new(
+                    sqlx::query_scalar::<_, String>(
+                        "SELECT p.perm_code FROM permission p \
+                         JOIN role_permission rp ON rp.permission_id = p.id \
+                         WHERE rp.role_id = $1",
+                    )
+                    .bind(self.role_id)
+                    .fetch_all(&state.db)
+                    .await?
+                    .into_iter()
+                    .collect(),
+                );
+                state
+                    .perm_cache
+                    .write()
+                    .expect("perm cache lock poisoned")
+                    .insert(self.role_id, (Arc::clone(&fresh), Instant::now()));
+                fresh
+            }
         };
         if perms.contains(perm) {
             Ok(())
@@ -168,6 +210,8 @@ where
 struct Claims {
     user_id: i64,
     username: String,
+    // 兼容已签发 token 的字段;授权不再以它们为准——中间件验签后会从
+    // 数据库(经 30s 缓存)取当前角色构造 `Auth`,降权/禁用对已签发 token 生效
     role_id: i64,
     role_code: String,
     exp: usize,
@@ -185,7 +229,10 @@ fn decode_token(
     .map(|data| data.claims)
 }
 
-/// 全局认证中间件:非公开路径必须带 `Authorization: Bearer <token>`
+/// 全局认证中间件:非公开路径必须带 `Authorization: Bearer <token>`。
+/// 验签通过后还要查账号活性(30s 进程内缓存):被禁用/删除的账号最迟 30s 内
+/// 被踢下线;`Auth` 里的角色用数据库当前值,不用 token 签发时的声明——
+/// 降权/改角色对已签发 token 同样生效。
 pub async fn auth_middleware(
     State(state): State<AppState>,
     mut req: Request,
@@ -211,12 +258,79 @@ pub async fn auth_middleware(
         return (StatusCode::UNAUTHORIZED, "token 无效或已过期")
             .into_response();
     };
-    req.extensions_mut().insert(Auth {
-        user_id: claims.user_id,
-        role_id: claims.role_id,
-        role_code: claims.role_code,
+    match load_user_state(&state, claims.user_id).await {
+        Ok(Some(u)) if u.status == 1 => {
+            req.extensions_mut().insert(Auth {
+                user_id: claims.user_id,
+                role_id: u.role_id,
+                role_code: u.role_code,
+            });
+            next.run(req).await
+        }
+        Ok(_) => {
+            (StatusCode::UNAUTHORIZED, "账号不存在或已被禁用").into_response()
+        }
+        Err(e) => {
+            tracing::error!("用户状态查询失败: {e}");
+            (StatusCode::SERVICE_UNAVAILABLE, "服务暂时不可用,请稍后重试")
+                .into_response()
+        }
+    }
+}
+
+/// 查用户活性(缓存 30s):None = 用户不存在。不缓存"不存在"(负缓存):
+/// 构造合法签名 token 需要先拿到 JWT 密钥,被删账号 token 的偶发回源查询可接受
+async fn load_user_state(
+    state: &AppState,
+    user_id: i64,
+) -> Result<Option<UserCacheEntry>, Error> {
+    let cached = state
+        .user_cache
+        .read()
+        .expect("user cache lock poisoned")
+        .get(&user_id)
+        .cloned();
+    if let Some(entry) =
+        cached.filter(|e| cache_entry_fresh(e.fetched_at, USER_CACHE_TTL))
+    {
+        return Ok(Some(entry));
+    }
+    let row: Option<(i16, i64, String)> = sqlx::query_as(
+        "SELECT u.status, u.role_id, r.role_code \
+         FROM app_user u JOIN role r ON r.id = u.role_id WHERE u.id = $1",
+    )
+    .bind(user_id)
+    .fetch_optional(&state.db)
+    .await?;
+    let entry = row.map(|(status, role_id, role_code)| UserCacheEntry {
+        status,
+        role_id,
+        role_code,
+        fetched_at: Instant::now(),
     });
-    next.run(req).await
+    {
+        let mut guard =
+            state.user_cache.write().expect("user cache lock poisoned");
+        match &entry {
+            Some(e) => {
+                guard.insert(user_id, e.clone());
+            }
+            // 用户已不存在:清掉可能残留的旧条目
+            None => {
+                guard.remove(&user_id);
+            }
+        }
+    }
+    Ok(entry)
+}
+
+/// 用户资料/状态变更后主动失效其缓存条目(`update_user`/`delete_user` 调用)
+fn invalidate_user_cache(state: &AppState, user_id: i64) {
+    state
+        .user_cache
+        .write()
+        .expect("user cache lock poisoned")
+        .remove(&user_id);
 }
 
 pub fn is_public(path: &str, method: &Method) -> bool {
@@ -277,6 +391,55 @@ pub async fn verify_password_async(
     tokio::task::spawn_blocking(move || verify_password(&password, &hashed))
         .await
         .map_err(|e| Error::Internal(format!("密码校验任务异常: {e}")))
+}
+
+// ---------------- 越权守卫 / 密码策略 ----------------
+/// 越权守卫:只有 `super_admin` 本人能操作 `super_admin` 账号、或把任何人(含自己)
+/// 改成 `super_admin` 角色。硬编码单一特殊角色,保持规则直白(0004 迁移的设计意图)
+pub fn guard_super_admin(
+    caller_role: &str,
+    target_now_super: bool,
+    assigning_super: bool,
+) -> Result<(), Error> {
+    if caller_role == SUPER_ADMIN {
+        return Ok(());
+    }
+    if target_now_super {
+        return Err(Error::Forbidden(
+            "无权操作系统管理员(super_admin)账号".into(),
+        ));
+    }
+    if assigning_super {
+        return Err(Error::Forbidden(
+            "无权授予系统管理员(super_admin)角色".into(),
+        ));
+    }
+    Ok(())
+}
+
+/// 启用状态的 `super_admin` 账号数(防锁死守卫用:动最后一个之前必须还有别人)
+async fn enabled_super_admin_count(db: &PgPool) -> Result<i64, Error> {
+    Ok(sqlx::query_scalar(
+        "SELECT COUNT(*) FROM app_user u JOIN role r ON r.id = u.role_id \
+         WHERE r.role_code = 'super_admin' AND u.status = 1",
+    )
+    .fetch_one(db)
+    .await?)
+}
+
+/// 密码策略:8~64 字符,至少一个 ASCII 字母和一个数字
+pub fn validate_password(p: &str) -> Result<(), Error> {
+    if p.len() < 8 || p.len() > 64 {
+        return Err(Error::BadRequest("密码长度需在 8~64 之间".into()));
+    }
+    if !p.bytes().any(|b| b.is_ascii_alphabetic())
+        || !p.bytes().any(|b| b.is_ascii_digit())
+    {
+        return Err(Error::BadRequest(
+            "密码需至少包含一个字母和一个数字".into(),
+        ));
+    }
+    Ok(())
 }
 
 // ---------------- 输出模型 ----------------
@@ -423,21 +586,18 @@ async fn login(
     )
     .bind(body.username.trim())
     .fetch_optional(&s.db)
-    .await?
-    .ok_or_else(|| Error::Unauthorized("用户名或密码错误".into()))?;
+    .await?;
 
-    if user.status != 1 {
+    // 时序抹平:用户不存在/被禁用也执行一次同样的 Argon2 校验,
+    // 否则"用户名是否存在"能从响应时间差(差一次 Argon2 的耗时)被探测出来
+    let hash = user
+        .as_ref()
+        .map_or_else(|| DUMMY_HASH.clone(), |u| u.password_hash.clone());
+    let verified =
+        verify_password_async(body.password, hash, &s.argon2_sem).await?;
+    let Some(user) = user.filter(|u| verified && u.status == 1) else {
         return Err(Error::Unauthorized("用户名或密码错误".into()));
-    }
-    if !verify_password_async(
-        body.password,
-        user.password_hash.clone(),
-        &s.argon2_sem,
-    )
-    .await?
-    {
-        return Err(Error::Unauthorized("用户名或密码错误".into()));
-    }
+    };
 
     let permissions: Vec<String> = sqlx::query_scalar(
         "SELECT p.perm_code FROM permission p \
@@ -544,17 +704,17 @@ async fn create_user(
     if username.is_empty() || username.len() > 64 {
         return Err(Error::BadRequest("用户名长度需在 1~64 之间".into()));
     }
-    if body.password.len() < 6 || body.password.len() > 64 {
-        return Err(Error::BadRequest("密码长度需在 6~64 之间".into()));
-    }
-    let role_exists: bool =
-        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM role WHERE id = $1)")
+    validate_password(&body.password)?;
+    let new_role_code: Option<String> =
+        sqlx::query_scalar("SELECT role_code FROM role WHERE id = $1")
             .bind(body.role_id)
-            .fetch_one(&s.db)
+            .fetch_optional(&s.db)
             .await?;
-    if !role_exists {
+    let Some(new_role_code) = new_role_code else {
         return Err(Error::BadRequest("角色不存在".into()));
-    }
+    };
+    // 越权守卫:非 super_admin 不能创建 super_admin 账号
+    guard_super_admin(&auth.role_code, false, new_role_code == SUPER_ADMIN)?;
     let hash = hash_password_async(body.password, &s.argon2_sem).await?;
     // 用户名唯一性交给 UNIQUE 约束裁决:预检查 + 插入之间存在 TOCTOU 竞态,
     // 并发重名注册应得到 409 而非 500
@@ -575,6 +735,8 @@ async fn create_user(
         }
         Err(e) => return Err(e.into()),
     };
+    crate::api::audit(&s.db, Some(auth.user_id), "user.create", &username, "")
+        .await;
     let user = fetch_user_by_id(&s.db, new_id)
         .await?
         .ok_or_else(|| Error::Internal("新账号创建后查询失败".into()))?;
@@ -604,11 +766,83 @@ async fn delete_user(
     let user = fetch_user_by_id(&s.db, id)
         .await?
         .ok_or_else(|| Error::NotFound(format!("账号 {id} 不存在")))?;
+    // 越权守卫:非 super_admin 不能删除 super_admin 账号
+    guard_super_admin(&auth.role_code, user.role_code == SUPER_ADMIN, false)?;
+    // 防锁死:不能删除最后一个启用状态的 super_admin 账号
+    if user.role_code == SUPER_ADMIN
+        && user.status == 1
+        && enabled_super_admin_count(&s.db).await? <= 1
+    {
+        return Err(Error::Forbidden(
+            "至少保留一个启用状态的系统管理员账号".into(),
+        ));
+    }
     sqlx::query("DELETE FROM app_user WHERE id = $1")
         .bind(id)
         .execute(&s.db)
         .await?;
+    invalidate_user_cache(&s, id);
+    crate::api::audit(&s.db, Some(auth.user_id), "user.delete", &user.username, "")
+        .await;
     Ok(Json(user))
+}
+
+/// `update_user` 的守卫链:存在性 → 越权(`super_admin` 保护)→ 防锁死。
+/// 全部通过则返回目标用户名(审计用)
+async fn guard_user_update(
+    s: &AppState,
+    auth: &Auth,
+    id: i64,
+    body: &UpdateUserIn,
+) -> Result<String, Error> {
+    // 目标当前角色/状态/用户名(越权守卫、防锁死与审计都要用)
+    let target: Option<(String, i16, String)> = sqlx::query_as(
+        "SELECT r.role_code, u.status, u.username FROM app_user u \
+         JOIN role r ON r.id = u.role_id WHERE u.id = $1",
+    )
+    .bind(id)
+    .fetch_optional(&s.db)
+    .await?;
+    let Some((target_role, target_status, target_name)) = target else {
+        return Err(Error::NotFound(format!("账号 {id} 不存在")));
+    };
+    // 守卫 A:目标是 super_admin 账号 → 只有 super_admin 本人能改
+    // (堵"admin 直接改 superadmin 密码实现接管")
+    guard_super_admin(&auth.role_code, target_role == SUPER_ADMIN, false)?;
+    // 如果要改角色:验证角色存在 + 守卫 B:非 super_admin 不能把任何人改成 super_admin
+    if let Some(rid) = body.role_id {
+        let rc: Option<String> =
+            sqlx::query_scalar("SELECT role_code FROM role WHERE id = $1")
+                .bind(rid)
+                .fetch_optional(&s.db)
+                .await?;
+        let Some(rc) = rc else {
+            return Err(Error::BadRequest("角色不存在".into()));
+        };
+        let assigning_super = rc == SUPER_ADMIN;
+        guard_super_admin(&auth.role_code, false, assigning_super)?;
+        // 守卫 C(防锁死)之一:把启用中的 super_admin 改走
+        if target_role == SUPER_ADMIN && target_status == 1 && !assigning_super
+        {
+            ensure_not_last_super_admin(s).await?;
+        }
+    }
+    // 守卫 C(防锁死)之二:禁用启用中的 super_admin
+    if target_role == SUPER_ADMIN && target_status == 1 && body.status == Some(0)
+    {
+        ensure_not_last_super_admin(s).await?;
+    }
+    Ok(target_name)
+}
+
+/// 防锁死:本次操作会让一个启用中的 `super_admin` 离开 → 必须还有其他启用状态的
+async fn ensure_not_last_super_admin(s: &AppState) -> Result<(), Error> {
+    if enabled_super_admin_count(&s.db).await? <= 1 {
+        return Err(Error::Forbidden(
+            "至少保留一个启用状态的系统管理员账号".into(),
+        ));
+    }
+    Ok(())
 }
 
 #[utoipa::path(
@@ -631,23 +865,12 @@ async fn update_user(
     Json(body): Json<UpdateUserIn>,
 ) -> Result<Json<UserOut>, Error> {
     auth.require(&s, "user:manage").await?;
-    // 检查用户是否存在
-    let exists: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM app_user WHERE id = $1)",
-    )
-    .bind(id)
-    .fetch_one(&s.db)
-    .await?;
-    if !exists {
-        return Err(Error::NotFound(format!("账号 {id} 不存在")));
+    let target_name = guard_user_update(&s, &auth, id, &body).await?;
+    // 如果要改密码，校验密码策略
+    if let Some(pwd) = &body.password {
+        validate_password(pwd)?;
     }
-    // 如果要改密码，验证长度
-    if let Some(pwd) = &body.password
-        && (pwd.len() < 6 || pwd.len() > 64)
-    {
-        return Err(Error::BadRequest("密码长度需在 6~64 之间".into()));
-    }
-    // 如果要改用户名，验证长度和唯一性
+    // 如果要改用户名，验证长度和唯一性(预查是快路径,并发兜底靠下方 23505 映射)
     if let Some(uname) = &body.username {
         let uname = uname.trim();
         if uname.is_empty() || uname.len() > 64 {
@@ -664,69 +887,67 @@ async fn update_user(
             return Err(Error::Conflict("用户名已存在".into()));
         }
     }
-    // 如果要改角色，验证角色存在
-    if let Some(rid) = body.role_id {
-        let role_exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM role WHERE id = $1)",
-        )
-        .bind(rid)
-        .fetch_one(&s.db)
-        .await?;
-        if !role_exists {
-            return Err(Error::BadRequest("角色不存在".into()));
-        }
-    }
     // 构建动态 UPDATE
     let mut qb = sqlx::QueryBuilder::new("UPDATE app_user SET ");
-    let mut changed = body
-        .username
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-        .is_some_and(|uname| {
-            qb.push("username = ").push_bind(uname);
-            true
-        });
-    if let Some(name) = body
-        .real_name
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
+    let mut changed_fields: Vec<&str> = Vec::new();
     {
-        if changed {
-            qb.push(", ");
+        let mut sep = qb.separated(", ");
+        if let Some(uname) = body
+            .username
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            sep.push("username = ").push_bind_unseparated(uname);
+            changed_fields.push("username");
         }
-        qb.push("real_name = ").push_bind(name);
-        changed = true;
-    }
-    if let Some(pwd) = &body.password {
-        if changed {
-            qb.push(", ");
+        if let Some(name) = body
+            .real_name
+            .as_deref()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            sep.push("real_name = ").push_bind_unseparated(name);
+            changed_fields.push("real_name");
         }
-        // 走异步包装 + 并发闸:同步版会卡住 tokio worker(perf 报告 F2 结论)
-        let hash = hash_password_async(pwd.clone(), &s.argon2_sem).await?;
-        qb.push("password_hash = ").push_bind(hash);
-        changed = true;
-    }
-    if let Some(rid) = body.role_id {
-        if changed {
-            qb.push(", ");
+        if let Some(pwd) = &body.password {
+            // 走异步包装 + 并发闸:同步版会卡住 tokio worker(perf 报告 F2 结论)
+            let hash = hash_password_async(pwd.clone(), &s.argon2_sem).await?;
+            sep.push("password_hash = ").push_bind_unseparated(hash);
+            changed_fields.push("password");
         }
-        qb.push("role_id = ").push_bind(rid);
-        changed = true;
-    }
-    if let Some(st) = body.status {
-        if changed {
-            qb.push(", ");
+        if let Some(rid) = body.role_id {
+            sep.push("role_id = ").push_bind_unseparated(rid);
+            changed_fields.push("role_id");
         }
-        qb.push("status = ").push_bind(st);
-        changed = true;
+        if let Some(st) = body.status {
+            sep.push("status = ").push_bind_unseparated(st);
+            changed_fields.push("status");
+        }
     }
-    if !changed {
+    if changed_fields.is_empty() {
         return Err(Error::BadRequest("没有可更新的字段".into()));
     }
     qb.push(", updated_at = now() WHERE id = ").push_bind(id);
-    qb.build().execute(&s.db).await?;
+    // 用户名唯一性由 UNIQUE 约束兜底:预查与更新之间的并发重名应得到 409 而非 500
+    if let Err(e) = qb.build().execute(&s.db).await {
+        if let sqlx::Error::Database(dbe) = &e
+            && dbe.code().as_deref() == Some("23505")
+        {
+            return Err(Error::Conflict("用户名已存在".into()));
+        }
+        return Err(e.into());
+    }
+    // 角色/状态可能已变:失效目标用户的活性缓存,最迟下一请求按新值生效
+    invalidate_user_cache(&s, id);
+    crate::api::audit(
+        &s.db,
+        Some(auth.user_id),
+        "user.update",
+        &target_name,
+        &format!("变更字段: {}", changed_fields.join(", ")),
+    )
+    .await;
     let user = fetch_user_by_id(&s.db, id)
         .await?
         .ok_or_else(|| Error::Internal("更新后查询失败".into()))?;
@@ -872,6 +1093,14 @@ async fn update_role_permissions(
         .write()
         .expect("perm cache lock poisoned")
         .remove(&id);
+    crate::api::audit(
+        &s.db,
+        Some(auth.user_id),
+        "role.perms_update",
+        role_code.as_deref().unwrap_or("?"),
+        &format!("permission_ids={:?}", body.permission_ids),
+    )
+    .await;
     Ok(StatusCode::NO_CONTENT)
 }
 

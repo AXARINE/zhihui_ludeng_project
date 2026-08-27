@@ -19,9 +19,10 @@ use tokio::sync::Semaphore;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 use utoipa_swagger_ui::SwaggerUi;
 
-/// 角色权限缓存:`role_id` → 权限码集合(命中即免一次 SQL;
-/// 变更只经由 `update_role_permissions`,该接口提交后失效对应条目)
-pub type PermCache = Arc<RwLock<HashMap<i64, Arc<HashSet<String>>>>>;
+/// 角色权限缓存:`role_id` → (权限码集合, 入库时刻)。命中且未过 TTL(60s)免一次 SQL;
+/// 变更只经由 `update_role_permissions`,该接口提交后失效对应条目;TTL 兜底直接改库的场景
+pub type PermCache =
+    Arc<RwLock<HashMap<i64, (Arc<HashSet<String>>, std::time::Instant)>>>;
 
 /// 应用状态。所有字段均为廉价 Clone(PgPool/Arc 内部共享),
 /// 直接作为 axum 状态类型按值克隆,无需再套一层 `Arc<AppState>`
@@ -33,6 +34,10 @@ pub struct AppState {
     /// JWT 签名密钥,必须通过环境变量 `JWT_SECRET` 覆盖开发默认值
     pub jwt_secret: Arc<str>,
     pub perm_cache: PermCache,
+    /// 用户状态缓存(JWT 验签后的账号活性校验,30s TTL,见 auth.rs)
+    pub user_cache: auth::UserCache,
+    /// `IoTDA` 回调共享 token(`IOTDA_WEBHOOK_TOKEN`);None = 回调不鉴权(仅本地开发)
+    pub webhook_token: Option<Arc<str>>,
     /// Argon2 校验并发闸(许可数 = `ARGON2_MAX_CONCURRENCY`,默认 32):
     /// 每次校验 19MiB 工作内存,登录风暴下无闸会被打爆 RSS(见 perf 报告 F2)
     pub argon2_sem: Arc<Semaphore>,
@@ -57,6 +62,22 @@ fn main() -> anyhow::Result<()> {
         .enable_all()
         .build()?;
     runtime.block_on(async_main())
+}
+
+/// 读 `IOTDA_WEBHOOK_TOKEN`:空串/未设 = None(回调不鉴权,仅本地开发用,
+/// 公网部署必须配置,此处打 warn 提醒)
+fn webhook_token_from_env() -> Option<Arc<str>> {
+    let token: Option<Arc<str>> = std::env::var("IOTDA_WEBHOOK_TOKEN")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .map(Into::into);
+    if token.is_none() {
+        tracing::warn!(
+            "IOTDA_WEBHOOK_TOKEN 未设置,/api/iotda/callback 不鉴权(公网部署请务必配置)"
+        );
+    }
+    token
 }
 
 async fn async_main() -> anyhow::Result<()> {
@@ -96,11 +117,14 @@ async fn async_main() -> anyhow::Result<()> {
 
     let argon2_concurrency = env_usize("ARGON2_MAX_CONCURRENCY", 32).max(1);
     let login_limit = env_usize("LOGIN_RATE_LIMIT_PER_MIN", 30);
+    let webhook_token = webhook_token_from_env();
     let state = AppState {
         db,
         iothub: IothubClient::from_env()?,
         jwt_secret,
         perm_cache: PermCache::default(),
+        user_cache: auth::UserCache::default(),
+        webhook_token,
         argon2_sem: Arc::new(Semaphore::new(argon2_concurrency)),
         login_limiter: Arc::new(LoginLimiter::new(login_limit)),
     };

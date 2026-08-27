@@ -263,9 +263,10 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 | GET | `/api/commands` | `command:log` | 全局指令留痕 | 200 |
 | GET | `/api/alarms` | `alarm:log` | 告警列表（可多条件过滤） | 200 |
 | PATCH | `/api/alarms/{id}` | `alarm:log` | 标记告警已处理/恢复未处理 | 200 |
+| GET | `/api/audit-logs` | `user:manage` | 审计流水（账号/角色/阈值变更，from/to/limit） | 200 |
 | GET | `/api/dashboard` | `device:status` | 首页聚合统计 | 200 |
 | POST | `/api/assistant/ask` | `assistant:qa` | 维护智能问答 | 200 |
-| POST | `/api/iotda/callback` | 公开（免 JWT 无认证） | IoTDA 数据转发 HTTP 推送入口 | 200 |
+| POST | `/api/iotda/callback` | 公开（免 JWT；配置 `IOTDA_WEBHOOK_TOKEN` 后需 `Authorization: Bearer` 校验） | IoTDA 数据转发 HTTP 推送入口 | 200 |
 
 ### 5.3 认证与账号
 

@@ -617,3 +617,92 @@ fn lux_history_sql_uses_strict_before_cursor() {
     api::push_lux_filters(&mut qb2, "dev1", None, None, None);
     assert!(!qb2.sql().as_str().contains("created_at <"));
 }
+
+// ---------------- 安全修复:越权守卫 / webhook token / 密码策略 / 缓存 TTL ----------------
+
+#[test]
+fn guard_super_admin_rules() {
+    // super_admin 本人:任意操作放行
+    assert!(auth::guard_super_admin(auth::SUPER_ADMIN, true, true).is_ok());
+    // 非 super_admin:操作 super_admin 账号 → 403(堵"改 superadmin 密码接管")
+    assert!(matches!(
+        auth::guard_super_admin("admin", true, false),
+        Err(Error::Forbidden(_))
+    ));
+    // 非 super_admin:授予 super_admin 角色 → 403(堵"提权")
+    assert!(matches!(
+        auth::guard_super_admin("admin", false, true),
+        Err(Error::Forbidden(_))
+    ));
+    // 非 super_admin:操作普通账号、不授 super_admin → 放行
+    assert!(auth::guard_super_admin("admin", false, false).is_ok());
+    // municipal 同样受限
+    assert!(matches!(
+        auth::guard_super_admin("municipal", true, false),
+        Err(Error::Forbidden(_))
+    ));
+}
+
+#[test]
+fn webhook_token_check() {
+    // 未配置 IOTDA_WEBHOOK_TOKEN = 不鉴权(本地开发)
+    assert!(webhook::token_ok(None, None));
+    assert!(webhook::token_ok(None, Some("Bearer anything")));
+    // 已配置:必须 Bearer 完全匹配
+    assert!(webhook::token_ok(Some("s3cr3t"), Some("Bearer s3cr3t")));
+    assert!(!webhook::token_ok(Some("s3cr3t"), None));
+    assert!(!webhook::token_ok(Some("s3cr3t"), Some("Bearer wrong")));
+    // 缺 Bearer 前缀 / 前缀部分匹配 都不算
+    assert!(!webhook::token_ok(Some("s3cr3t"), Some("s3cr3t")));
+    assert!(!webhook::token_ok(Some("s3cr3t"), Some("Bearer s3cr3tX")));
+}
+
+#[test]
+fn validate_password_policy() {
+    assert!(auth::validate_password("abc12345").is_ok());
+    // 引导账号默认密码本身合规(策略变更不影响 bootstrap)
+    assert!(auth::validate_password("admin123").is_ok());
+    assert!(auth::validate_password("a1").is_err()); // 太短(<8)
+    assert!(auth::validate_password("abcdefgh").is_err()); // 纯字母
+    assert!(auth::validate_password("12345678").is_err()); // 纯数字
+    assert!(auth::validate_password(&"a1".repeat(32)).is_ok()); // 64 位边界
+    assert!(auth::validate_password(&format!("{}x", "a1".repeat(32))).is_err()); // 65 位
+}
+
+#[test]
+fn cache_entry_freshness() {
+    let ttl = std::time::Duration::from_secs(30);
+    let now = std::time::Instant::now();
+    assert!(auth::cache_entry_fresh(now, ttl));
+    let stale = now.checked_sub(std::time::Duration::from_secs(60)).unwrap();
+    assert!(!auth::cache_entry_fresh(stale, ttl));
+}
+
+#[tokio::test]
+async fn internal_error_body_leaks_nothing() {
+    // 500/502 响应体必须是通用文案,不含 DB/北向错误细节(细节只进日志)
+    let resp = Error::Db(sqlx::Error::PoolTimedOut).into_response();
+    assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let text = std::str::from_utf8(&body).unwrap();
+    assert_eq!(text, "服务器内部错误");
+    assert!(!text.contains("database error"));
+
+    let resp = Error::Iothub(anyhow::anyhow!("secret-boom")).into_response();
+    assert_eq!(resp.status(), StatusCode::BAD_GATEWAY);
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    let text = std::str::from_utf8(&body).unwrap();
+    assert_eq!(text, "IoTDA 北向调用失败");
+    assert!(!text.contains("secret-boom"));
+
+    // 面向客户端的错误仍返回原文案
+    let resp = Error::BadRequest("bad input".into()).into_response();
+    let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+        .await
+        .unwrap();
+    assert_eq!(std::str::from_utf8(&body).unwrap(), "bad input");
+}
