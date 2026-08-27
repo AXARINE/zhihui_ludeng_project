@@ -204,7 +204,7 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 ### 4.3 安全注意事项
 
 - `JWT_SECRET` 必须覆盖开发默认值 `dev-secret-change-me`，建议 32 字节以上随机串；泄露后所有已签发 token 可被伪造。
-- 当前 token **无服务端吊销机制**：删除或禁用账号后，已签发的 token 在 24 小时有效期内仍能通过中间件访问其他接口；其中账号被删除后 `/api/auth/me` 会因查不到账号返回 401，禁用账号不会触发该检查。需要严格吊销时，应增加黑名单/版本号机制或缩短 TTL。
+- 账号活性复检（**token 隐式吊销**）：认证中间件验签后按 `user_cache`（30s TTL）校验账号仍存在且启用，因此禁用/删除/降权后已签发 token **最迟 30s 失效**（`update_user`/`delete_user` 提交后主动失效对应缓存条目，TTL 兜底"绕过 API 直接改库"的场景）；角色取自数据库而非 token claims，改角色后无需等旧 token 过期。
 - 引导账号按角色分别判断：`BOOTSTRAP_SUPER_ADMIN_*` / `BOOTSTRAP_ADMIN_*` 只在对应角色**没有任何账号**时生效；生产首次启动后请删除或修改默认账号。
 - 防权限锁死：`super_admin` 的权限映射被接口硬保护（403 拒绝修改）；拥有 `role:manage` 的角色修改**自己**的权限时，必须保留 `role:manage`，否则同样 403。
 - CORS 当前为开发期全放开（`CorsLayer` Any，只在 `main.rs` 装配一处，业务 router 不再各自加层），上线前应收紧为前端实际域名。
@@ -300,7 +300,7 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 { "username": "operator", "password": "secret6", "real_name": "值班员", "role_id": 1 }
 ```
 
-校验规则：`username` 去空格后 1~64 字符；密码 6~64 字符；`role_id` 必须存在；用户名唯一。
+校验规则：`username` 去空格后 1~64 字符；密码 8~64 字符且须同时含字母和数字；`role_id` 必须存在；用户名唯一。
 
 **PATCH /api/users/{id}**
 
@@ -309,7 +309,7 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 { "username": "new_name", "password": "newpass123", "real_name": "新姓名", "role_id": 2, "status": 1 }
 ```
 
-校验规则：`username` 修改时需唯一且 1~64 字符；`password` 6~64 字符；`role_id` 必须存在；`status` 只能 0 或 1。
+校验规则：`username` 修改时需唯一且 1~64 字符；`password` 8~64 字符且须同时含字母和数字；`role_id` 必须存在；`status` 只能 0 或 1。
 
 **GET / PUT /api/roles/{id}/permissions**
 
@@ -696,6 +696,9 @@ cargo build
 | `BOOTSTRAP_SUPER_ADMIN_PASSWORD` | `superadmin123` | 仅当 `super_admin` 角色无账号时生效，生产必改 |
 | `BOOTSTRAP_ADMIN_USERNAME` | `admin` | 仅当 `admin` 角色无账号时生效 |
 | `BOOTSTRAP_ADMIN_PASSWORD` | `admin123` | 仅当 `admin` 角色无账号时生效，生产必改 |
+| `IOTDA_POLL_INTERVAL_SECS` | `8` | 影子轮询间隔秒数；启用数据转发推送后建议 60（推送为主、轮询兜底校准） |
+| `IOTDA_WEBHOOK_TOKEN` | 空 | 数据转发回调共享 token；配置后 `/api/iotda/callback` 要求 `Authorization: Bearer`（常数时间比较），留空=不鉴权（仅本地开发，启动有 warn，公网必须配置） |
+| `ALLOWED_ORIGINS` | 空 | CORS 白名单（逗号分隔）；留空=开发模式全放开（`Any`） |
 | `RUST_LOG` | `info` | tracing env-filter |
 
 - 后端**不会自动读取 `.env` 文件**（没有 dotenv 加载代码）：本地 `cargo run` 先 `set -a && . ./.env && set +a`；Docker Compose 由 `env_file` 注入。
@@ -755,7 +758,7 @@ cd backend
 
 - **指令无执行回执**：固件不回传命令执行结果，`command_record.status` 只有 `sent / failed`。
 - **阈值“半成功”**：`PUT /threshold` 先写库再下发；下发失败时本地已更新，接口返回 502。
-- **JWT 无吊销**：删号/禁用后旧 token 24h 内仍有效（详见 4.3）。
+- **token 吊销有 ≤30s 延迟**：删号/禁用后旧 token 最迟 30s 失效（账号活性复检，详见 4.3），期间仍可访问。
 - **`mode` 字段不实时**：后端没有根据控灯/联动结果回写 `device.mode`，目前仅作信息展示。
 - **GET /api/roles/{id}/permissions 不在 Swagger 文档**：历史遗漏，按 8.1 规范新增接口时应避免同类问题。
 - **北向 401**：优先检查是否用了旧版 SDK-HMAC-SHA256；标准版/企业版必须 V11 衍生签名，且 `HUAWEI_IOTDA_REGION` 或 endpoint 域名中的 region 必须正确。
