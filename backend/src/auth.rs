@@ -1105,6 +1105,17 @@ async fn update_role_permissions(
 }
 
 /// GET /api/roles/{id}/permissions —— 查询角色当前拥有的权限 ID 列表
+#[utoipa::path(
+    get,
+    path = "/api/roles/{id}/permissions",
+    params(("id" = i64, Path, description = "角色 ID")),
+    responses(
+        (status = 200, description = "当前权限 ID 列表", body = Vec<i64>),
+        (status = 403, description = "无权限"),
+        (status = 404, description = "角色不存在")
+    ),
+    security(("bearer_auth" = []))
+)]
 async fn get_role_permissions(
     State(s): State<AppState>,
     auth: Auth,

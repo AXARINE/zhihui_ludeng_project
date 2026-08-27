@@ -39,7 +39,7 @@
 | 账号与 RBAC | JWT + Argon2id；`municipal`（市政）/ `admin`（路灯管理员）/ `super_admin`（系统管理员）三角色 + 13 个权限点，权限可在线调整 |
 | 审计日志 | 用户/角色/阈值变更写 `audit_log`，控灯指令归因 `command_record.operator_id`，`GET /api/audit-logs` 查询 |
 | 智能问答 | 本地检索式维护助手：意图识别 + 实体/时间窗抽取 + 查库 + 模板回答（不依赖外部大模型） |
-| Swagger UI | `http://127.0.0.1:8080/docs` 在线调试接口 |
+| Swagger UI | `http://127.0.0.1:8080/docs` 在线调试全部接口 |
 
 ## 快速开始
 

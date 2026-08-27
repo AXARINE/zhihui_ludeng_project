@@ -246,7 +246,7 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 | DELETE | `/api/users/{id}` | `user:manage` | 删除账号（不能删自己） | 200 |
 | GET | `/api/roles` | `user:manage` | 角色列表 | 200 |
 | GET | `/api/permissions` | `user:manage` | 权限列表 | 200 |
-| GET | `/api/roles/{id}/permissions` | `role:manage` | 角色当前权限 ID 列表（*未注册到 Swagger*） | 200 |
+| GET | `/api/roles/{id}/permissions` | `role:manage` | 角色当前权限 ID 列表 | 200 |
 | PUT | `/api/roles/{id}/permissions` | `role:manage` | 全量替换角色权限映射（super_admin 角色受保护） | 204 |
 | GET | `/api/devices` | `device:status` | 设备列表 | 200 |
 | POST | `/api/devices` | `device:manage` | 注册设备（幂等） | 201 |
@@ -617,7 +617,7 @@ question
 
 ### 7.6 OpenAPI 文档
 
-- 规范要求所有对外 handler 都用 `#[utoipa::path]` 标注路径、参数、请求体、响应与安全方案（当前仅 `GET /api/roles/{id}/permissions` 是历史遗漏，见 5.2）。
+- 规范要求所有对外 handler 都用 `#[utoipa::path]` 标注路径、参数、请求体、响应与安全方案，并登记进 `openapi.rs` 的 `paths(...)`。
 - `src/openapi.rs` 汇总 `paths(...)` 并补充 `bearer_auth` 安全方案，Swagger UI 的 Authorize 可用。
 - 新增接口必须同步：route + `#[utoipa::path]` + `openapi.rs` 的 paths 注册，三者缺一会造成“接口可用但文档看不到”。
 
@@ -760,7 +760,6 @@ cd backend
 - **阈值“半成功”**：`PUT /threshold` 先写库再下发；下发失败时本地已更新，接口返回 502。
 - **token 吊销有 ≤30s 延迟**：删号/禁用后旧 token 最迟 30s 失效（账号活性复检，详见 4.3），期间仍可访问。
 - **`mode` 字段不实时**：后端没有根据控灯/联动结果回写 `device.mode`，目前仅作信息展示。
-- **GET /api/roles/{id}/permissions 不在 Swagger 文档**：历史遗漏，按 8.1 规范新增接口时应避免同类问题。
 - **北向 401**：优先检查是否用了旧版 SDK-HMAC-SHA256；标准版/企业版必须 V11 衍生签名，且 `HUAWEI_IOTDA_REGION` 或 endpoint 域名中的 region 必须正确。
 - **端口被占**：`8080` 冲突通常是代理软件全局模式，改规则模式或换端口。
 - **`cargo run` 读不到 .env**：后端不自动加载 `.env`，直接 `cargo run` 前必须 source（见 3.2）；用 `./dev.sh run` 则自动加载。

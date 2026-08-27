@@ -35,9 +35,11 @@ use utoipa::OpenApi;
         auth::me,
         auth::list_users,
         auth::create_user,
+        auth::update_user,
         auth::delete_user,
         auth::list_roles,
         auth::list_permissions,
+        auth::get_role_permissions,
         auth::update_role_permissions,
         webhook::iotda_callback
     )
