@@ -458,6 +458,34 @@ pub async fn run(state: AppState, iothub: Arc<IothubClient>) {
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     loop {
         ticker.tick().await;
+
+        // 本地超时检测: 90 秒未更新 last_seen_at 的设备直接标记离线
+        // 不依赖 IoTDA 的 device_status API（MQTT keepalive 超时 60-120 秒太慢）
+        let newly_offline: Vec<(String,)> = sqlx::query_as(
+            "UPDATE device SET status='offline' \
+             WHERE status='online' \
+             AND last_seen_at < now() - interval '90 seconds' \
+             RETURNING id",
+        )
+        .fetch_all(&state.db)
+        .await
+        .unwrap_or_default();
+
+        for (device_id,) in &newly_offline {
+            tracing::warn!("device {device_id} offline (local timeout)");
+            // 产生离线告警（避免重复）
+            let _ = sqlx::query(
+                "INSERT INTO alarm (device_id, type, message) \
+                 SELECT $1, 'offline', '设备离线' \
+                 WHERE NOT EXISTS ( \
+                     SELECT 1 FROM alarm \
+                     WHERE device_id=$1 AND type='offline' AND resolved_at IS NULL)",
+            )
+            .bind(device_id)
+            .execute(&state.db)
+            .await;
+        }
+
         let devices: Vec<(String,)> =
             match sqlx::query_as("SELECT id FROM device")
                 .fetch_all(&state.db)
