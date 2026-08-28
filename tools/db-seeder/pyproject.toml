@@ -1,0 +1,10 @@
+[project]
+name = "streetlight-db-seeder"
+version = "0.1.0"
+description = "智慧路灯数据库测试数据工具(tkinter GUI,直连 PostgreSQL)"
+requires-python = ">=3.11"
+dependencies = [
+    "psycopg[binary]>=3.2",
+    # Qt6 走 fontconfig,中文自动回退;WSLg 下用 wayland 平台,缩放由合成器处理
+    "PySide6-Essentials>=6.7",
+]
