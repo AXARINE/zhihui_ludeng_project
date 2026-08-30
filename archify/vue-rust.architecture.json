@@ -1,0 +1,352 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "智慧路灯系统:Vue 前端 + Rust 后端",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/AXARINE/zhihui_ludeng_project.git",
+      "revision": "07e250ff81fc2cb1b76ca7b7385ff092bec82088"
+    },
+    "views": [
+      {
+        "id": "main-path",
+        "label": "主链路:页面 → 设备",
+        "focus": [
+          "vue-app",
+          "api-client",
+          "api",
+          "bridge",
+          "iotda",
+          "device"
+        ],
+        "note": "从页面操作到设备命令下发、从设备上报回到界面展示的主链路。"
+      },
+      {
+        "id": "data-and-auth",
+        "label": "鉴权与数据落库",
+        "focus": [
+          "auth",
+          "api",
+          "bridge",
+          "postgres"
+        ],
+        "note": "JWT/RBAC 权限校验与 SQL 落库路径。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "vue-app",
+      "type": "frontend",
+      "label": "Vue 3 SPA",
+      "sublabel": "Vue Router · Pinia · Element Plus · Leaflet 地图",
+      "sources": [
+        {
+          "path": "frontend_vue/src/main.js",
+          "line": 1
+        },
+        {
+          "path": "frontend_vue/src/router/index.js",
+          "line": 1
+        }
+      ],
+      "pos": [
+        60,
+        260
+      ],
+      "size": [
+        188,
+        80
+      ]
+    },
+    {
+      "id": "api-client",
+      "type": "frontend",
+      "label": "Axios API 客户端",
+      "sublabel": "JWT 拦截器 · Vite /api 代理",
+      "sources": [
+        {
+          "path": "frontend_vue/src/utils/request.js",
+          "line": 1
+        }
+      ],
+      "pos": [
+        320,
+        260
+      ],
+      "size": [
+        130,
+        80
+      ]
+    },
+    {
+      "id": "auth",
+      "type": "backend",
+      "label": "auth.rs · JWT 鉴权",
+      "sublabel": "Argon2id · RBAC 权限点",
+      "sources": [
+        {
+          "path": "backend/src/auth.rs",
+          "line": 1
+        }
+      ],
+      "pos": [
+        600,
+        60
+      ],
+      "size": [
+        180,
+        70
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "api.rs · REST /api",
+      "sublabel": "axum 路由 · 权限校验",
+      "sources": [
+        {
+          "path": "backend/src/api.rs",
+          "line": 1
+        }
+      ],
+      "pos": [
+        600,
+        260
+      ],
+      "size": [
+        180,
+        80
+      ]
+    },
+    {
+      "id": "bridge",
+      "type": "backend",
+      "label": "iothub.rs + webhook.rs",
+      "sublabel": "北向 V11 轮询 + 推送回调",
+      "sources": [
+        {
+          "path": "backend/src/iothub.rs",
+          "line": 1
+        },
+        {
+          "path": "backend/src/webhook.rs",
+          "line": 1
+        }
+      ],
+      "pos": [
+        920,
+        260
+      ],
+      "size": [
+        180,
+        80
+      ]
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "PostgreSQL 16",
+      "sublabel": "sqlx · 设备/坐标/光照/审计",
+      "sources": [
+        {
+          "path": "backend/migrations/0001_init.sql",
+          "line": 1
+        },
+        {
+          "path": "backend/migrations/0006_device_coords.sql",
+          "line": 1
+        }
+      ],
+      "pos": [
+        910,
+        480
+      ],
+      "size": [
+        200,
+        80
+      ]
+    },
+    {
+      "id": "iotda",
+      "type": "cloud",
+      "label": "华为云 IoTDA",
+      "sublabel": "标准版实例 · cn-south-1",
+      "sources": [
+        {
+          "path": "华为云IoTDA部署文档.md",
+          "line": 1
+        }
+      ],
+      "pos": [
+        1215,
+        260
+      ],
+      "size": [
+        200,
+        80
+      ]
+    },
+    {
+      "id": "device",
+      "type": "external",
+      "label": "BearPi-HM Nano",
+      "sublabel": "Hi3861 + E53_SC1 · MQTT 1883",
+      "sources": [
+        {
+          "path": "C3_e53_sc1_pls/e53_sc1_example.c",
+          "line": 1
+        }
+      ],
+      "pos": [
+        1215,
+        80
+      ],
+      "size": [
+        200,
+        80
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "浏览器 · Vue 3 前端(Vite :5173)",
+      "wraps": [
+        "vue-app",
+        "api-client"
+      ],
+      "pad": 24
+    },
+    {
+      "kind": "region",
+      "label": "Rust 后端 · axum(:8080)",
+      "wraps": [
+        "auth",
+        "api",
+        "bridge"
+      ],
+      "pad": 24
+    }
+  ],
+  "connections": [
+    {
+      "id": "ui-calls",
+      "from": "vue-app",
+      "to": "api-client",
+      "label": "axios 请求",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "to-api",
+      "from": "api-client",
+      "to": "api",
+      "label": "REST /api + JWT",
+      "variant": "emphasis",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "api-auth",
+      "from": "api",
+      "to": "auth",
+      "label": "JWT 验签 + RBAC",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "api-bridge",
+      "from": "api",
+      "to": "bridge",
+      "label": "控灯/阈值下发",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "bridge-iotda",
+      "from": "bridge",
+      "to": "iotda",
+      "label": "查询/下发",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "iotda-push",
+      "from": "iotda",
+      "to": "bridge",
+      "label": "数据转发推送",
+      "variant": "dashed",
+      "fromSide": "bottom",
+      "toSide": "bottom"
+    },
+    {
+      "id": "device-iotda",
+      "from": "device",
+      "to": "iotda",
+      "label": "MQTT 1883",
+      "labelDy": 30,
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "bridge-db",
+      "from": "bridge",
+      "to": "postgres",
+      "label": "事件落库",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "labelDy": 50
+    },
+    {
+      "id": "api-db",
+      "from": "api",
+      "to": "postgres",
+      "label": "SQL (sqlx)",
+      "via": [
+        [
+          690,
+          520
+        ],
+        [
+          890,
+          520
+        ]
+      ],
+      "fromSide": "bottom",
+      "toSide": "left"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "前端 · Vue 3",
+      "items": [
+        "Vue 3 + Element Plus + ECharts",
+        "Leaflet 地图页:高德底图 · 框选控灯 · 拖动改点",
+        "Pinia 状态 · Vue Router 路由",
+        "Axios 注入 JWT · /api 代理 8080"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "后端 · Rust(axum)",
+      "items": [
+        "REST /api + JWT 鉴权与 RBAC",
+        "/api/map/devices 点位 · WGS84 坐标",
+        "iothub 北向轮询 · webhook 推送",
+        "assistant 维护问答 · Swagger /docs"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "数据 · 云与安全",
+      "items": [
+        "PostgreSQL 16 (sqlx) 持久化 · 0006 坐标迁移",
+        "华为云 IoTDA · MQTT 1883 上报",
+        "Argon2id · audit_log 审计流水"
+      ]
+    }
+  ]
+}

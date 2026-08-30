@@ -4,21 +4,9 @@
 
 ## 系统架构
 
-```
-┌──────────────────┐  Wi-Fi / MQTT (1883)  ┌──────────────────┐  北向 HTTPS   ┌──────────────────┐
-│  BearPi-HM Nano  │ ────────────────────→ │   华为云 IoTDA    │ ←─────────── →│  Rust 后端        │
-│  Hi3861 + E53_SC1│ ←──────────────────── │  (标准版, cn-south-1)│ ────────────→│  (axum :8080)    │
-│  (BH1750 + 补光灯) │     Light_Control_Led    │                   │  AK/SK V11 签名  └────────┬─────────┘
-└──────────────────┘                        └──────────────────┘                        │
-                                                                                   ┌───────┴────────┐
-                                                                                   │  PostgreSQL 16  │
-                                                                                   └───────┬────────┘
-                                                                                           │ REST /api (JWT + RBAC)
-                                                                                   ┌───────┴────────┐
-                                                                                   │  Vue3 前端      │
-                                                                                   │ (Vite :5173)   │
-                                                                                   └────────────────┘
-```
+[<img src="archify/preview.png" alt="智慧路灯系统架构图:Vue 前端 + Rust 后端" width="100%"/>](https://raw.githubusercontent.com/AXARINE/zhihui_ludeng_project/master/archify/vue-rust-frontend-backend.html "点击打开交互式架构图")
+
+> 点击上图打开**交互式架构图**(浏览器直接渲染,支持缩放 / 聚焦 / 明暗主题与导出);规格见 [`archify/vue-rust.architecture.json`](archify/vue-rust.architecture.json)。
 
 - **南向**：固件用 `oc_mqtt` 连 IoTDA **设备侧实例域名**（`xxx.st1.iotda-device.{region}.myhuaweicloud.com`，1883 明文；8883 MQTTS 在本工程实测不可用），每 5s 上报 `Light` 服务属性 `Luminance` / `LightStatus`。
 - **北向**：后端以 AK/SK **V11-HMAC-SHA256 衍生签名**轮询 IoTDA **应用侧实例域名**（查询状态/影子、下发命令、设置可写属性），数据落库 PostgreSQL；同时支持 IoTDA **数据转发 HTTP 推送**（`POST /api/iotda/callback`）作为事件驱动主通道。
