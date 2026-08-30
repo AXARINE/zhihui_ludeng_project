@@ -21,10 +21,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Stage static site
+        with:
+          fetch-depth: 0
+      - name: Render interactive diagram from spec
         run: |
+          npm install @tt-a1i/archify-dsh@0.1.0 --no-save --no-audit --no-fund --silent
           mkdir -p _site
-          cp -r archify/. _site/
+          cp archify/vue-rust.webp _site/
+          sed -i "s/\"revision\": \"[0-9a-f]\{40\}\"/\"revision\": \"$GITHUB_SHA\"/" archify/vue-rust.architecture.json
+          node node_modules/@tt-a1i/archify-dsh/skills/archify/bin/archify.mjs deliver architecture \
+            archify/vue-rust.architecture.json \
+            _site/vue-rust-frontend-backend.html \
+            --repo-root . --quality showcase
       - uses: actions/upload-pages-artifact@v3
         with:
           path: _site
