@@ -186,12 +186,14 @@ pub struct Device {
     pub created_at: DateTime<Utc>,
 }
 
-/// 坐标两列 → `Coordinates`(未定位返回 None;两列同 NULL 是写入端不变量)
+/// 坐标两列 → `Coordinates`(未定位返回 None;两列同 NULL 是写入端不变量)。
+/// 当前生产代码无调用方(地图接口直接透传两列),仅测试用它钉住该不变量,
+/// 故按 `#[cfg(test)]` 编译,避免二进制里出现 dead_code 警告。
 macro_rules! impl_coords_getter {
     ($($t:ty),+ $(,)?) => {
         $(
+            #[cfg(test)]
             impl $t {
-                #[must_use]
                 pub fn coords(&self) -> Option<Coordinates> {
                     Some(Coordinates {
                         latitude: self.latitude?,
@@ -291,7 +293,6 @@ pub struct Coordinates {
 
 impl Coordinates {
     /// 范围校验(`NaN`/无穷会被范围比较拒收)
-    #[must_use]
     pub fn validate(self) -> Result<Self, Error> {
         if !(-90.0..=90.0).contains(&self.latitude) {
             return Err(Error::BadRequest("latitude 需在 -90~90 之间".into()));
