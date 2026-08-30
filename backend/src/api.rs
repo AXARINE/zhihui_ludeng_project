@@ -186,26 +186,6 @@ pub struct Device {
     pub created_at: DateTime<Utc>,
 }
 
-/// 坐标两列 → `Coordinates`(未定位返回 None;两列同 NULL 是写入端不变量)。
-/// 当前生产代码无调用方(地图接口直接透传两列),仅测试用它钉住该不变量,
-/// 故按 `#[cfg(test)]` 编译,避免二进制里出现 dead_code 警告。
-macro_rules! impl_coords_getter {
-    ($($t:ty),+ $(,)?) => {
-        $(
-            #[cfg(test)]
-            impl $t {
-                pub fn coords(&self) -> Option<Coordinates> {
-                    Some(Coordinates {
-                        latitude: self.latitude?,
-                        longitude: self.longitude?,
-                    })
-                }
-            }
-        )+
-    };
-}
-impl_coords_getter!(Device, MapDevice);
-
 /// 地图点位视图:设备坐标 + 在线/灯态 + 最新光照,一次拉全供前端打点
 #[derive(Serialize, ToSchema, sqlx::FromRow)]
 pub struct MapDevice {

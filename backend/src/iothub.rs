@@ -693,8 +693,13 @@ async fn poll_device(
 
     // 影子属性 → 历史库 + 灯态 + 心跳(平台事件时间)
     if let Some(report) = iothub.shadow(device_id).await? {
-        apply_shadow_props(&state.db, device_id, &report.props, report.event_time)
-            .await?;
+        apply_shadow_props(
+            &state.db,
+            device_id,
+            &report.props,
+            report.event_time,
+        )
+        .await?;
     }
     Ok(())
 }
@@ -703,7 +708,7 @@ async fn poll_device(
 mod tests {
     use super::*;
 
-    /// 影子响应的 Light 服务带 event_time:属性与平台事件时间(心跳源)都能解析
+    /// 影子响应的 Light 服务带 `event_time:属性与平台事件时间(心跳源)都能解析`
     #[test]
     fn shadow_response_with_event_time() {
         let json = serde_json::json!({
@@ -724,7 +729,10 @@ mod tests {
             .unwrap();
         assert_eq!(svc.reported.properties.luminance, Some(350));
         assert_eq!(
-            svc.reported.event_time.as_deref().and_then(parse_event_time),
+            svc.reported
+                .event_time
+                .as_deref()
+                .and_then(parse_event_time),
             Some(
                 chrono::DateTime::parse_from_rfc3339("2026-08-26T10:30:00Z")
                     .unwrap()
@@ -733,7 +741,7 @@ mod tests {
         );
     }
 
-    /// 影子响应缺 event_time:属性照常解析,心跳时间为 None(不刷新 last_seen_at)
+    /// 影子响应缺 `event_time:属性照常解析,心跳时间为` None(不刷新 `last_seen_at`)
     #[test]
     fn shadow_response_without_event_time() {
         let json = serde_json::json!({

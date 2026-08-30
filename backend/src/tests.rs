@@ -300,6 +300,24 @@ fn coords_from_pairing_and_range() {
     );
 }
 
+// 测试辅助:坐标两列 → Coordinates(未定位返回 None;两列同 NULL 是写入端不变量)。
+// 生产代码无调用方(地图接口直接透传两列),故放在测试文件里钉住该不变量。
+macro_rules! impl_coords_getter {
+    ($($t:ty),+ $(,)?) => {
+        $(
+            impl $t {
+                fn coords(&self) -> Option<crate::api::Coordinates> {
+                    Some(crate::api::Coordinates {
+                        latitude: self.latitude?,
+                        longitude: self.longitude?,
+                    })
+                }
+            }
+        )+
+    };
+}
+impl_coords_getter!(api::Device, api::MapDevice);
+
 #[test]
 fn coords_getter_pair_semantics() {
     use api::{Coordinates, Device, MapDevice};
