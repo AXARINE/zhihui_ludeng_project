@@ -5,9 +5,6 @@
 # ---- 构建阶段 ----
 FROM rust:1-bookworm AS builder
 WORKDIR /app
-COPY Cargo.toml Cargo.lock ./
-COPY migrations ./migrations
-COPY src ./src
 # 国内网络直连 static.crates.io 极慢,换 rsproxy.cn 稀疏镜像
 RUN printf '%s\n' \
     '[source.crates-io]' \
@@ -15,8 +12,15 @@ RUN printf '%s\n' \
     '[source.rsproxy-sparse]' \
     'registry = "sparse+https://rsproxy.cn/index/"' \
     > "$CARGO_HOME/config.toml"
+# 先用空壳源码编译依赖层:Cargo.toml/lock 不变则缓存命中,改 src 不再全量重拉依赖
+COPY Cargo.toml Cargo.lock ./
+RUN mkdir -p src migrations && echo 'fn main() {}' > src/main.rs \
+    && cargo build --release --locked
+# 再拷真实源码重编项目层(touch 让 cargo 认为 main.rs 比依赖层更新)
+COPY migrations ./migrations
+COPY src ./src
 # sqlx 查询均为运行时执行(无 query! 宏),构建期不需要数据库
-RUN cargo build --release --locked
+RUN touch src/main.rs && cargo build --release --locked
 
 # ---- 运行阶段 ----
 FROM debian:bookworm-slim

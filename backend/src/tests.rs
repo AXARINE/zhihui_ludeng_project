@@ -243,6 +243,114 @@ fn clamp_limit_defaults_and_bounds() {
     assert_eq!(api::clamp_limit(Some(500), 50, 500), 500);
 }
 
+#[test]
+fn coords_from_pairing_and_range() {
+    use api::Coordinates;
+    use api::coords_from;
+    // 都不传 = 未提供,合法
+    assert_eq!(coords_from(None, None).unwrap(), None);
+    // 正常 WGS84(广州附近)
+    let c = coords_from(Some(23.13), Some(113.26)).unwrap().unwrap();
+    assert_eq!((c.latitude, c.longitude), (23.13, 113.26));
+    // 边界值含端点
+    assert!(coords_from(Some(90.0), Some(-180.0)).is_ok());
+    assert!(coords_from(Some(-90.0), Some(180.0)).is_ok());
+    // 只传一侧 → 400
+    assert!(matches!(
+        coords_from(Some(23.0), None).unwrap_err(),
+        Error::BadRequest(_)
+    ));
+    assert!(matches!(
+        coords_from(None, Some(113.0)).unwrap_err(),
+        Error::BadRequest(_)
+    ));
+    // 越界(NaN/无穷也会被范围比较拒收)
+    assert!(matches!(
+        coords_from(Some(90.1), Some(113.0)).unwrap_err(),
+        Error::BadRequest(_)
+    ));
+    assert!(matches!(
+        coords_from(Some(23.0), Some(-180.1)).unwrap_err(),
+        Error::BadRequest(_)
+    ));
+    assert!(matches!(
+        coords_from(Some(f64::NAN), Some(113.0)).unwrap_err(),
+        Error::BadRequest(_)
+    ));
+    assert!(matches!(
+        coords_from(Some(23.0), Some(f64::INFINITY)).unwrap_err(),
+        Error::BadRequest(_)
+    ));
+    // validate 独立可用(范围校验本体)
+    assert!(
+        Coordinates {
+            latitude: 0.0,
+            longitude: 0.0
+        }
+        .validate()
+        .is_ok()
+    );
+    assert!(
+        Coordinates {
+            latitude: 91.0,
+            longitude: 0.0
+        }
+        .validate()
+        .is_err()
+    );
+}
+
+#[test]
+fn coords_getter_pair_semantics() {
+    use api::{Coordinates, Device, MapDevice};
+    let mut d = Device {
+        id: "x".into(),
+        name: String::new(),
+        location: String::new(),
+        latitude: None,
+        longitude: None,
+        status: api::DeviceStatus::Offline,
+        lamp: api::LampState::Off,
+        mode: api::ControlMode::Auto,
+        last_seen_at: None,
+        created_at: DateTime::parse_from_rfc3339("2026-08-30T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc),
+    };
+    // 未定位 → None
+    assert!(d.coords().is_none());
+    // 成对 → Some(值与字段一致)
+    d.latitude = Some(23.13);
+    d.longitude = Some(113.26);
+    assert_eq!(
+        d.coords(),
+        Some(Coordinates {
+            latitude: 23.13,
+            longitude: 113.26
+        })
+    );
+    // MapDevice 同一宏实现,抽查一例
+    let m = MapDevice {
+        id: "x".into(),
+        name: String::new(),
+        location: String::new(),
+        latitude: Some(1.0),
+        longitude: Some(2.0),
+        status: api::DeviceStatus::Offline,
+        lamp: api::LampState::Off,
+        mode: api::ControlMode::Auto,
+        lux: None,
+        last_seen_at: None,
+    };
+    assert_eq!(
+        m.coords(),
+        Some(Coordinates {
+            latitude: 1.0,
+            longitude: 2.0
+        })
+    );
+}
+
 // ---------------- 认证:密码哈希与公开路径 ----------------
 
 #[test]
@@ -666,7 +774,8 @@ fn validate_password_policy() {
     assert!(auth::validate_password("abcdefgh").is_err()); // 纯字母
     assert!(auth::validate_password("12345678").is_err()); // 纯数字
     assert!(auth::validate_password(&"a1".repeat(32)).is_ok()); // 64 位边界
-    assert!(auth::validate_password(&format!("{}x", "a1".repeat(32))).is_err()); // 65 位
+    assert!(auth::validate_password(&format!("{}x", "a1".repeat(32))).is_err());
+    // 65 位
 }
 
 #[test]

@@ -21,6 +21,7 @@ use utoipa::OpenApi;
         api::lux_history,
         api::lux_stats,
         api::global_lux_latest,
+        api::map_devices,
         api::set_lamp,
         api::get_threshold,
         api::put_threshold,

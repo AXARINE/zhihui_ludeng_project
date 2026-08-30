@@ -249,13 +249,14 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 | GET | `/api/roles/{id}/permissions` | `role:manage` | 角色当前权限 ID 列表 | 200 |
 | PUT | `/api/roles/{id}/permissions` | `role:manage` | 全量替换角色权限映射（super_admin 角色受保护） | 204 |
 | GET | `/api/devices` | `device:status` | 设备列表 | 200 |
-| POST | `/api/devices` | `device:manage` | 注册设备（幂等） | 201 |
-| PATCH | `/api/devices/{id}` | `device:manage` | 更新设备名称/位置 | 200 |
+| POST | `/api/devices` | `device:manage` | 注册设备（幂等，可带经纬度） | 201 |
+| PATCH | `/api/devices/{id}` | `device:manage` | 更新设备名称/位置/经纬度 | 200 |
 | DELETE | `/api/devices/{id}` | `device:manage` | 删除设备并清空关联数据 | 204 |
 | GET | `/api/devices/{id}/lux/latest` | `luminance:monitor` | 单设备最新一条光照 | 200 |
 | GET | `/api/devices/{id}/lux/history` | `luminance:history` | 单设备历史光照 | 200 |
 | GET | `/api/devices/{id}/lux/stats` | `luminance:history` | 单设备光照统计 | 200 |
 | GET | `/api/lux/latest` | `luminance:monitor` | 所有设备的最新光照 | 200 |
+| GET | `/api/map/devices` | `device:status` | 地图点位（坐标+状态+最新光照） | 200 |
 | POST | `/api/devices/{id}/lamp` | `control:manual` | 开灯/关灯/自动（下发 IoTDA） | 202 |
 | GET | `/api/devices/{id}/threshold` | `config:threshold` | 查询阈值（未配置返回 40） | 200 |
 | PUT | `/api/devices/{id}/threshold` | `config:threshold` | 更新阈值并下发 IoTDA | 204 |
@@ -331,14 +332,21 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 
 ```jsonc
 // 请求
-{ "id": "your_device_id", "name": "智慧路灯1号", "location": "南门路段" }
+{
+  "id": "your_device_id",
+  "name": "智慧路灯1号",
+  "location": "南门路段",
+  "latitude": 23.1291,     // 可选,WGS84 纬度
+  "longitude": 113.2644    // 可选,WGS84 经度;必须与 latitude 成对提供
+}
 ```
 
 - `id` 为必填，去空格后 1~64 字符，必须与 IoTDA 设备 ID 一致。
 - 重复注册（同 ID）不报错，返回 201（`ON CONFLICT DO NOTHING`，幂等）。
 - 只有注册进 `device` 表的设备才会被 8 秒轮询任务查询。
+- 经纬度可选；只传其中一个返回 400，范围越界（纬度 ±90、经度 ±180）返回 400。
 
-**PATCH /api/devices/{id}**：`name`、`location` 至少提供一个非空值，动态 SQL 只更新传入字段。
+**PATCH /api/devices/{id}**：`name`、`location`、`latitude+longitude`（成对）至少提供一项，动态 SQL 只更新传入字段。
 
 **DELETE /api/devices/{id}**：在**单个事务**内删除 `device / config / lux_record / alarm / command_record` 五张表里的关联数据（任一步失败整体回滚，不留孤儿数据）；事务提交成功返回 204（不校验设备是否存在）。
 
@@ -349,6 +357,8 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
   "id": "your_device_id",
   "name": "智慧路灯1号",
   "location": "南门路段",
+  "latitude": 23.1291,       // WGS84 纬度,null = 未定位
+  "longitude": 113.2644,     // WGS84 经度,null = 未定位
   "status": "online",       // online / offline，由轮询任务维护
   "lamp": "on",             // on / off，来自影子 LightStatus
   "mode": "auto",           // auto / manual（当前为信息字段，见“已知限制”）
@@ -357,7 +367,33 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 }
 ```
 
-### 5.5 光照数据
+### 5.5 地图点位
+
+**GET /api/map/devices**
+
+一次返回全部设备的点位信息，供前端地图打点（弹窗数据齐全，无需逐设备再查）：
+
+```jsonc
+[
+  {
+    "id": "your_device_id",
+    "name": "智慧路灯1号",
+    "location": "南门路段",
+    "latitude": 23.1291,       // null = 未定位,前端跳过该点
+    "longitude": 113.2644,
+    "status": "online",       // online / offline,建议映射点位颜色
+    "lamp": "on",             // on / off
+    "mode": "auto",
+    "lux": 352,               // 最新一条光照,从未上报则 null
+    "last_seen_at": "2026-08-25T10:00:00Z"
+  }
+]
+```
+
+- 坐标为 **WGS84**（GPS 原始坐标系）；前端用高德/腾讯底图（GCJ-02）时需自行转换，OpenStreetMap/天地图可直接使用。
+- 权限 `device:status`（地图本质是状态可视化，与设备列表同权限）。
+
+### 5.6 光照数据
 
 **GET /api/devices/{id}/lux/latest**
 
@@ -384,7 +420,7 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 
 `LuxRecord` 结构：`{ "id": 123, "device_id": "dev001", "lux": 400, "created_at": "..." }`
 
-### 5.6 控灯与阈值
+### 5.7 控灯与阈值
 
 **POST /api/devices/{id}/lamp**
 
@@ -410,7 +446,7 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 
 先 upsert 到本地 `config` 表，再调 IoTDA 北向 `PUT .../properties` 下发 `Threshold`。注意：如果本地库已写入但北向下发失败，接口返回 502，本地值会保留（当前实现如此，调试时留意两端一致性）。
 
-### 5.7 指令留痕
+### 5.8 指令留痕
 
 - `GET /api/devices/{id}/commands?from=&to=&limit=`
 - `GET /api/commands?device_id=&from=&to=&limit=`
@@ -427,7 +463,7 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 }
 ```
 
-### 5.8 告警
+### 5.9 告警
 
 **GET /api/alarms?device_id=&resolved=&from=&to=&type=&limit=**
 
@@ -443,7 +479,7 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 
 告警结构：`{ "id": 1, "device_id": "dev001", "type": "offline", "message": "设备离线", "created_at": "...", "resolved_at": null }`
 
-### 5.9 仪表盘
+### 5.10 仪表盘
 
 **GET /api/dashboard**
 
@@ -458,7 +494,7 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 }
 ```
 
-### 5.10 维护智能问答
+### 5.11 维护智能问答
 
 **POST /api/assistant/ask**
 
@@ -479,7 +515,7 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 
 | 表 | 用途 | 关键字段 |
 |---|---|---|
-| `device` | 已注册设备与实时状态 | `id`(PK), `status`, `lamp`, `mode`, `last_seen_at` |
+| `device` | 已注册设备与实时状态 | `id`(PK), `status`, `lamp`, `mode`, `last_seen_at`, `latitude/longitude`(WGS84,可空,0006) |
 | `lux_record` | 光照历史 | 自增 id，`device_id + created_at` 索引 |
 | `config` | 每设备阈值 | `device_id`(PK), `threshold` 默认 40 |
 | `alarm` | 告警 | `type`, `message`, `resolved_at`（非空=已处理） |

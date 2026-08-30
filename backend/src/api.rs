@@ -169,6 +169,10 @@ pub struct Device {
     pub id: String,
     pub name: String,
     pub location: String,
+    /// WGS84 纬度(-90~90;NULL = 未定位)
+    pub latitude: Option<f64>,
+    /// WGS84 经度(-180~180;NULL = 未定位)
+    pub longitude: Option<f64>,
     #[sqlx(try_from = "String")]
     pub status: DeviceStatus,
     #[sqlx(try_from = "String")]
@@ -177,6 +181,43 @@ pub struct Device {
     pub mode: ControlMode,
     pub last_seen_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
+}
+
+/// 坐标两列 → `Coordinates`(未定位返回 None;两列同 NULL 是写入端不变量)
+macro_rules! impl_coords_getter {
+    ($($t:ty),+ $(,)?) => {
+        $(
+            impl $t {
+                #[must_use]
+                pub fn coords(&self) -> Option<Coordinates> {
+                    Some(Coordinates {
+                        latitude: self.latitude?,
+                        longitude: self.longitude?,
+                    })
+                }
+            }
+        )+
+    };
+}
+impl_coords_getter!(Device, MapDevice);
+
+/// 地图点位视图:设备坐标 + 在线/灯态 + 最新光照,一次拉全供前端打点
+#[derive(Serialize, ToSchema, sqlx::FromRow)]
+pub struct MapDevice {
+    pub id: String,
+    pub name: String,
+    pub location: String,
+    pub latitude: Option<f64>,
+    pub longitude: Option<f64>,
+    #[sqlx(try_from = "String")]
+    pub status: DeviceStatus,
+    #[sqlx(try_from = "String")]
+    pub lamp: LampState,
+    #[sqlx(try_from = "String")]
+    pub mode: ControlMode,
+    /// 最新一条光照(设备从未上报过则为 NULL)
+    pub lux: Option<i32>,
+    pub last_seen_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Serialize, ToSchema, sqlx::FromRow)]
@@ -218,12 +259,82 @@ pub struct CreateDevice {
     pub id: String,
     pub name: Option<String>,
     pub location: Option<String>,
+    /// WGS84 纬度,与 longitude 必须成对提供(可都不传)
+    pub latitude: Option<f64>,
+    /// WGS84 经度,与 latitude 必须成对提供(可都不传)
+    pub longitude: Option<f64>,
 }
 
 #[derive(Deserialize, ToSchema)]
 pub struct UpdateDevice {
     pub name: Option<String>,
     pub location: Option<String>,
+    /// WGS84 纬度,与 longitude 必须成对提供(不传则不改)
+    pub latitude: Option<f64>,
+    /// WGS84 经度,与 latitude 必须成对提供(不传则不改)
+    pub longitude: Option<f64>,
+}
+
+/// WGS84 坐标对:类型上表达"经纬度成对存在"的语义。
+/// DB 侧仍平铺为 `device.latitude/longitude` 两列,JSON 侧平铺两字段,
+/// 只有需要"整体是/否已定位"的场合才用本类型
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, ToSchema)]
+pub struct Coordinates {
+    /// 纬度(-90~90)
+    pub latitude: f64,
+    /// 经度(-180~180)
+    pub longitude: f64,
+}
+
+impl Coordinates {
+    /// 范围校验(`NaN`/无穷会被范围比较拒收)
+    #[must_use]
+    pub fn validate(self) -> Result<Self, Error> {
+        if !(-90.0..=90.0).contains(&self.latitude) {
+            return Err(Error::BadRequest("latitude 需在 -90~90 之间".into()));
+        }
+        if !(-180.0..=180.0).contains(&self.longitude) {
+            return Err(Error::BadRequest(
+                "longitude 需在 -180~180 之间".into(),
+            ));
+        }
+        Ok(self)
+    }
+
+    /// 拼进 `UPDATE ... SET` 的赋值段:`latitude = $n, longitude = $n+1`。
+    /// 两列是成对整体,中间的 ", " 必须手写——`Separated::push` 会自动
+    /// 追加分隔符,再写逗号会拼出 ", , " 双逗号(api.rs 内有踩坑记录)
+    fn push_assign(
+        self,
+        sep: &mut sqlx::query_builder::Separated<
+            '_,
+            sqlx::Postgres,
+            &'static str,
+        >,
+    ) {
+        sep.push("latitude = ").push_bind_unseparated(self.latitude);
+        sep.push_unseparated(", longitude = ")
+            .push_bind_unseparated(self.longitude);
+    }
+}
+
+/// 请求体里平铺的可选坐标两字段 → 成对且范围合法的 `Coordinates`。
+/// `Ok(None)` = 未提供;只传一侧 → 400
+pub fn coords_from(
+    lat: Option<f64>,
+    lng: Option<f64>,
+) -> Result<Option<Coordinates>, Error> {
+    match (lat, lng) {
+        (None, None) => Ok(None),
+        (Some(lat), Some(lng)) => Ok(Some(
+            Coordinates {
+                latitude: lat,
+                longitude: lng,
+            }
+            .validate()?,
+        )),
+        _ => Err(Error::BadRequest("latitude/longitude 必须成对提供".into())),
+    }
 }
 
 #[derive(Deserialize)]
@@ -383,6 +494,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/alarms/{id}", patch(patch_alarm))
         .route("/api/audit-logs", get(list_audit_logs))
         .route("/api/lux/latest", get(global_lux_latest))
+        .route("/api/map/devices", get(map_devices))
         .route("/api/commands", get(list_global_commands))
         .route("/api/dashboard", get(dashboard))
         .route("/api/assistant/ask", post(assistant_ask))
@@ -471,7 +583,7 @@ async fn list_devices(
 ) -> Result<Json<Vec<Device>>, Error> {
     auth.require(&s, "device:status").await?;
     let rows = sqlx::query_as::<_, Device>(
-        "SELECT id, name, location, status, lamp, mode, last_seen_at, created_at \
+        "SELECT id, name, location, latitude, longitude, status, lamp, mode, last_seen_at, created_at \
          FROM device ORDER BY created_at",
     )
     .fetch_all(&s.db)
@@ -502,13 +614,17 @@ async fn create_device(
     }
     let name = body.name.as_deref().unwrap_or(&id).trim();
     let location = body.location.as_deref().unwrap_or_default().trim();
+    let coords = coords_from(body.latitude, body.longitude)?;
     sqlx::query(
-        "INSERT INTO device (id, name, location) VALUES ($1, $2, $3) \
+        "INSERT INTO device (id, name, location, latitude, longitude) \
+         VALUES ($1, $2, $3, $4, $5) \
          ON CONFLICT (id) DO NOTHING",
     )
     .bind(&id)
     .bind(name)
     .bind(location)
+    .bind(coords.map(|c| c.latitude))
+    .bind(coords.map(|c| c.longitude))
     .execute(&s.db)
     .await?;
     Ok(StatusCode::CREATED)
@@ -534,6 +650,7 @@ async fn update_device(
     Json(body): Json<UpdateDevice>,
 ) -> Result<Json<Device>, Error> {
     auth.require(&s, "device:manage").await?;
+    let coords = coords_from(body.latitude, body.longitude)?;
     let mut qb = sqlx::QueryBuilder::new("UPDATE device SET ");
     let mut changed = false;
     {
@@ -556,10 +673,14 @@ async fn update_device(
             sep.push("location = ").push_bind_unseparated(location);
             changed = true;
         }
+        if let Some(c) = coords {
+            c.push_assign(&mut sep);
+            changed = true;
+        }
     }
     if !changed {
         return Err(Error::BadRequest(
-            "name/location 至少提供一个非空字段".into(),
+            "name/location/latitude+longitude 至少提供一个非空字段".into(),
         ));
     }
     qb.push(" WHERE id = ").push_bind(&id);
@@ -568,7 +689,7 @@ async fn update_device(
         return Err(Error::NotFound(format!("设备 {id} 不存在")));
     }
     let row = sqlx::query_as::<_, Device>(
-        "SELECT id, name, location, status, lamp, mode, last_seen_at, created_at \
+        "SELECT id, name, location, latitude, longitude, status, lamp, mode, last_seen_at, created_at \
          FROM device WHERE id = $1",
     )
     .bind(&id)
@@ -607,6 +728,32 @@ async fn delete_device(
     }
     tx.commit().await?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------- 地图点位 ----------------
+#[utoipa::path(
+    get,
+    path = "/api/map/devices",
+    responses((status = 200, description = "全部设备的地图点位(坐标 + 状态 + 最新光照;未定位设备坐标为 null)", body = Vec<MapDevice>)),
+    security(("bearer_auth" = []))
+)]
+async fn map_devices(
+    State(s): State<AppState>,
+    auth: Auth,
+) -> Result<Json<Vec<MapDevice>>, Error> {
+    auth.require(&s, "device:status").await?;
+    // 设备量小(单实例),每设备最新光照走相关子查询即可,无需 LATERAL/窗口函数
+    let rows = sqlx::query_as::<_, MapDevice>(
+        "SELECT d.id, d.name, d.location, d.latitude, d.longitude, \
+                d.status, d.lamp, d.mode, \
+                (SELECT lux FROM lux_record WHERE device_id = d.id \
+                 ORDER BY created_at DESC LIMIT 1) AS lux, \
+                d.last_seen_at \
+         FROM device d ORDER BY d.created_at",
+    )
+    .fetch_all(&s.db)
+    .await?;
+    Ok(Json(rows))
 }
 
 /// 给 `lux_record` 查询追加统一的 WHERE 条件
@@ -1093,7 +1240,8 @@ async fn list_audit_logs(
     if let Some(to) = to {
         qb.push(" AND created_at <= ").push_bind(to);
     }
-    qb.push(" ORDER BY created_at DESC, id DESC LIMIT ").push(limit);
+    qb.push(" ORDER BY created_at DESC, id DESC LIMIT ")
+        .push(limit);
     let rows = qb.build_query_as::<AuditLog>().fetch_all(&s.db).await?;
     Ok(Json(rows))
 }
