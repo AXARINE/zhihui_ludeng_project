@@ -106,6 +106,61 @@ export const mockThresholdConfig = {
 }
 
 // ============================================
+// 地图点位（符合后端 /api/map/devices 响应格式）
+// ============================================
+// 【注意】后端坐标是 WGS84，状态/灯态/模式是小写
+export const mockMapDeviceList = [
+  {
+    id: 'dev-001',
+    name: '路灯001',
+    location: '东川路',
+    latitude: 31.024,          // WGS84 纬度
+    longitude: 121.437,        // WGS84 经度
+    status: 'online',
+    lamp: 'on',
+    mode: 'auto',
+    lux: 12,
+    last_seen_at: '2026-08-22T10:30:00Z'
+  },
+  {
+    id: 'dev-002',
+    name: '路灯002',
+    location: '思源路',
+    latitude: 31.021,
+    longitude: 121.442,
+    status: 'offline',
+    lamp: 'off',
+    mode: 'manual',
+    lux: 35,
+    last_seen_at: '2026-08-20T18:45:00Z'
+  },
+  {
+    id: 'dev-003',
+    name: '路灯003',
+    location: '宣桥路',
+    latitude: 31.028,
+    longitude: 121.445,
+    status: 'online',
+    lamp: 'off',
+    mode: 'auto',
+    lux: 260,
+    last_seen_at: '2026-08-22T09:15:00Z'
+  },
+  {
+    id: 'dev-004',
+    name: '路灯004（未定位）',
+    location: '',
+    latitude: null,
+    longitude: null,
+    status: 'online',
+    lamp: 'on',
+    mode: 'manual',
+    lux: 8,
+    last_seen_at: '2026-08-21T14:20:00Z'
+  }
+]
+
+// ============================================
 // 模拟响应（用于 Mock 接口）
 // ============================================
 // 【作用】模拟后端成功响应

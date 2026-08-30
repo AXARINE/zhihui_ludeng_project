@@ -16,7 +16,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { ref, computed, watch } from 'vue'
 import {
     Monitor, List, Bell, Setting, Document,
-    User, ChatDotRound, Lock, UserFilled
+    User, ChatDotRound, Lock, UserFilled, MapLocation
 } from '@element-plus/icons-vue'
 
 const router = useRouter()
@@ -108,6 +108,14 @@ function handleLogout() {
                         <List />
                     </el-icon>
                     <span>设备列表</span>
+                </el-menu-item>
+
+                <!-- 设备地图 — 需要 device:status 权限 -->
+                <el-menu-item v-if="hasPerm('device:status')" index="/map">
+                    <el-icon>
+                        <MapLocation />
+                    </el-icon>
+                    <span>设备地图</span>
                 </el-menu-item>
 
                 <!-- 告警列表 — 需要 alarm:log 权限 -->

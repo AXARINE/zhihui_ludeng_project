@@ -19,6 +19,7 @@ import { ElMessage } from 'element-plus'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { updateDevice } from '@/api/device'
 import { formatBeijingTime } from '@/utils/time'
+import { gcj02ToWgs84 } from '@/utils/coord'
 
 const deviceStore = useDeviceStore()
 const router = useRouter()
@@ -60,15 +61,22 @@ const editLoading = ref(false)
 const editForm = ref({
   id: '',
   name: '',
-  location: ''
+  location: '',
+  latitude: '',      // 字符串方便输入，空串 = 清除/未填
+  longitude: ''
 })
+// 输入的坐标是否来自高德拾取器（GCJ-02）；保存时自动转 WGS84 入库
+const isGcj02Input = ref(false)
 
 function handleEditDevice(device) {
   editForm.value = {
     id: device.id,
     name: device.name || '',
-    location: device.location || ''
+    location: device.location || '',
+    latitude: device.latitude != null ? String(device.latitude) : '',
+    longitude: device.longitude != null ? String(device.longitude) : ''
   }
+  isGcj02Input.value = false
   editVisible.value = true
 }
 
@@ -78,6 +86,35 @@ async function handleSaveDevice() {
     const data = {}
     if (editForm.value.name.trim()) data.name = editForm.value.name.trim()
     if (editForm.value.location.trim()) data.location = editForm.value.location.trim()
+
+    // 坐标：两字段成对填写（都空 = 不改）
+    const latStr = editForm.value.latitude.trim()
+    const lngStr = editForm.value.longitude.trim()
+    if (latStr || lngStr) {
+      if (!latStr || !lngStr) {
+        ElMessage.warning('纬度和经度需成对填写')
+        return
+      }
+      let lat = parseFloat(latStr)
+      let lng = parseFloat(lngStr)
+      if (isNaN(lat) || isNaN(lng)) {
+        ElMessage.warning('坐标格式不正确，请输入数字')
+        return
+      }
+      // 高德拾取器给出的是 GCJ-02，先转 WGS84（后端约定统一存 WGS84）
+      if (isGcj02Input.value) {
+        const wgs = gcj02ToWgs84(lng, lat)
+        lng = wgs.lng
+        lat = wgs.lat
+      }
+      if (lat < -90 || lat > 90 || lng < -180 || lng > 180) {
+        ElMessage.warning('坐标超出范围（纬度 -90~90，经度 -180~180）')
+        return
+      }
+      data.latitude = lat
+      data.longitude = lng
+    }
+
     if (Object.keys(data).length === 0) {
       ElMessage.warning('没有可更新的字段')
       return
@@ -226,7 +263,7 @@ onMounted(() => {
     </el-card>
 
     <!-- 编辑设备对话框 -->
-    <el-dialog v-model="editVisible" title="编辑设备信息" width="420px">
+    <el-dialog v-model="editVisible" title="编辑设备信息" width="480px">
       <el-form label-width="80px">
         <el-form-item label="设备ID">
           <el-input :value="editForm.id" disabled />
@@ -236,6 +273,17 @@ onMounted(() => {
         </el-form-item>
         <el-form-item label="位置">
           <el-input v-model="editForm.location" placeholder="请输入设备位置" />
+        </el-form-item>
+        <el-form-item label="纬度">
+          <el-input v-model="editForm.latitude" placeholder="如 31.0245（与经度成对填写）" />
+        </el-form-item>
+        <el-form-item label="经度">
+          <el-input v-model="editForm.longitude" placeholder="如 121.4372（与纬度成对填写）" />
+        </el-form-item>
+        <el-form-item>
+          <el-checkbox v-model="isGcj02Input">
+            坐标来自高德拾取器（GCJ-02，保存时自动转 WGS84）
+          </el-checkbox>
         </el-form-item>
       </el-form>
       <template #footer>

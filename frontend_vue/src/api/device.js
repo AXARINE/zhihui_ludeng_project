@@ -320,3 +320,24 @@ export function getGlobalLuxLatest() {
 export function getHealth() {
   return request({ url: '/health', method: 'get' })
 }
+
+// ============================================
+// 19. 获取地图点位（全部设备：坐标 + 状态 + 最新光照）
+// GET /api/map/devices
+// ============================================
+export function getMapDevices() {
+  return request({
+    url: '/map/devices',
+    method: 'get'
+  })
+  // 返回格式：
+  // {
+  //   id, name, location,
+  //   latitude, longitude,   // WGS84 坐标，未定位设备为 null
+  //   status,                // 'online' / 'offline'
+  //   lamp,                  // 'on' / 'off'
+  //   mode,                  // 'auto' / 'manual'
+  //   lux,                   // 最新光照，从未上报为 null
+  //   last_seen_at
+  // }
+}

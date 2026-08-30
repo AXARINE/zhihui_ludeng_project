@@ -30,6 +30,13 @@ const routes = [
   },
 
   {
+    path: '/map',
+    name: 'MapPage',
+    component: () => import('@/pages/MapPage.vue'),
+    meta: { title: '设备地图' }
+  },
+
+  {
     path: '/device/:id',
     name: 'DeviceDetail',
     component: () => import('@/pages/DeviceDetail.vue'),
