@@ -7,7 +7,8 @@ export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, 'src')
+      // 使用 import.meta.dirname（Node 20.11+ / Vite 8 native loader 要求），替代 __dirname
+      '@': path.resolve(import.meta.dirname, 'src')
     }
   },
   // ============================================

@@ -73,11 +73,16 @@ const getStatusType = (alarm) => {
 }
 
 // ============================================
-// 7. 告警处理
+// 7. 告警处理（id<0 为演示告警：本地切换，不调后端）
 // ============================================
 async function handleResolve(id) {
   try {
-    await resolveAlarm(id)
+    if (id < 0) {
+      const demoAlarm = deviceStore.alarmList.find(a => a.id === id)
+      if (demoAlarm) demoAlarm.resolved_at = new Date().toISOString()
+    } else {
+      await resolveAlarm(id)
+    }
     ElMessage.success('告警已标记为已处理')
     deviceStore.fetchAlarmList()
   } catch (e) {
@@ -87,7 +92,12 @@ async function handleResolve(id) {
 
 async function handleUnresolve(id) {
   try {
-    await unresolveAlarm(id)
+    if (id < 0) {
+      const demoAlarm = deviceStore.alarmList.find(a => a.id === id)
+      if (demoAlarm) demoAlarm.resolved_at = null
+    } else {
+      await unresolveAlarm(id)
+    }
     ElMessage.success('告警已恢复为未处理')
     deviceStore.fetchAlarmList()
   } catch (e) {

@@ -25,6 +25,7 @@ import { Refresh, Select } from '@element-plus/icons-vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 import { getMapDevices, controlLamp } from '@/api/device'
+import { createNotification } from '@/api/notify'
 import { mockMapDeviceList, mockResponse } from '@/mock/device'
 import { wgs84ToGcj02 } from '@/utils/coord'
 import { formatBeijingTime } from '@/utils/time'
@@ -33,6 +34,9 @@ const router = useRouter()
 
 // 与 store 同款开关：VITE_USE_MOCK=false 时走真实后端
 const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false'
+
+// 演示点位（测试用灯，不接真实硬件）—— 直线排列定义在共享模块
+import { DEMO_LAMPS } from '@/constants/demoLamps'
 
 // ---- 权限判断（与 DeviceList 同款写法） ----
 function hasPerm(code) {
@@ -44,6 +48,8 @@ function hasPerm(code) {
   } catch { return false }
 }
 const canControl = computed(() => hasPerm('control:manual'))
+// 是否可发起维修通知（市政人员 / 系统管理员）
+const canNotify = computed(() => hasPerm('notify:send'))
 
 // ---- 数据 ----
 const devices = ref([])
@@ -98,20 +104,21 @@ function markerClass(d) {
 }
 
 // 构建点位图标（divIcon：纯 CSS 圆点，不依赖图片资源）
-// 选中的设备（框选）加 selected 类：放大 + 赤陶描边
+// 选中的设备（框选）加 selected 类：放大 + 赤陶描边；异常设备加三角警告角标
 function buildIcon(d) {
   const cls = markerClass(d)
   const selected = selectedIds.value.includes(d.id)
   const label = escapeHtml(d.name || d.id)
+  const warn = (d.status || '').toLowerCase() !== 'online' ? '<span class="pin-warn">⚠</span>' : ''
   return L.divIcon({
     className: 'lamp-marker',
-    html: `<div class="lamp-pin ${cls}${selected ? ' selected' : ''}"><span class="pin-core"></span></div><span class="pin-label">${label}</span>`,
+    html: `<div class="lamp-pin ${cls}${selected ? ' selected' : ''}"><span class="pin-core"></span>${warn}</div><span class="pin-label">${label}</span>`,
     iconSize: [22, 36],
     iconAnchor: [11, 11]
   })
 }
 
-// 构建弹窗内容
+// 构建弹窗内容：单设备控制 + 异常设备"通知维修"按钮
 function buildPopup(d) {
   const status = (d.status || '').toLowerCase()
   const lamp = (d.lamp || '').toLowerCase()
@@ -120,6 +127,14 @@ function buildPopup(d) {
   const statusCls = status === 'online' ? 'ok' : 'bad'
   const lampText = lamp === 'on' ? '💡 亮' : lamp === 'off' ? '🌑 灭' : '未知'
   const modeText = mode === 'auto' ? '自动' : mode === 'manual' ? '手动' : '未知'
+  const ctrlBtns = canControl.value ? `
+    <div class="popup-btns">
+      <button class="pbtn on" data-id="${escapeHtml(d.id)}" data-act="on">开灯</button>
+      <button class="pbtn off" data-id="${escapeHtml(d.id)}" data-act="off">关灯</button>
+      <button class="pbtn auto" data-id="${escapeHtml(d.id)}" data-act="auto">自动</button>
+    </div>` : ''
+  const repairBtn = canNotify.value && status !== 'online' ? `
+    <button class="popup-repair" data-id="${escapeHtml(d.id)}">🔧 通知路灯管理员维修</button>` : ''
   return `
     <div class="popup-box">
       <div class="popup-title">${escapeHtml(d.name || d.id)}</div>
@@ -130,7 +145,11 @@ function buildPopup(d) {
       <div class="popup-row"><span>模式</span><span>${modeText}</span></div>
       <div class="popup-row"><span>光照</span><span>${d.lux != null ? d.lux + ' lx' : '无数据'}</span></div>
       <div class="popup-row"><span>最后在线</span><span>${d.last_seen_at ? formatBeijingTime(d.last_seen_at) : '从未'}</span></div>
-      <button class="popup-detail-btn" data-id="${escapeHtml(d.id)}">查看详情</button>
+      ${ctrlBtns}
+      ${repairBtn}
+      ${d.demo
+        ? '<div class="popup-tip" style="margin-top:8px;color:#9AA3AF;font-size:12px">演示点位：本地模拟，不接真实硬件；控灯即时生效。</div>'
+        : `<button class="popup-detail-btn" data-id="${escapeHtml(d.id)}">查看详情</button>`}
     </div>`
 }
 
@@ -139,7 +158,7 @@ async function fetchMapDevices() {
   loading.value = true
   try {
     const res = USE_MOCK ? await mockResponse(mockMapDeviceList) : await getMapDevices()
-    devices.value = res || []
+    devices.value = [...(res || []), ...DEMO_LAMPS]
     lastUpdated.value = formatBeijingTime(new Date().toISOString(), 'time')
     renderMarkers()
 
@@ -316,7 +335,18 @@ async function batchControl(action) {
   batchLoading.value = true
   try {
     const results = await Promise.allSettled(
-      ids.map(id => USE_MOCK ? mockResponse({ success: true }) : controlLamp(id, action))
+      ids.map(id => {
+        const d = devices.value.find(x => x.id === id)
+        // 演示灯：本地模拟控制（不调后端，避免 404）
+        if (d && d.demo) {
+          d.mode = action === 'auto' ? 'auto' : 'manual'
+          if (action === 'on' || action === 'off') d.lamp = action
+          const m = markerMap.get(id)
+          if (m) { m.setIcon(buildIcon(d)); m.setPopupContent(buildPopup(d)) }
+          return Promise.resolve({ success: true })
+        }
+        return USE_MOCK ? mockResponse({ success: true }) : controlLamp(id, action)
+      })
     )
     const failed = results.filter(r => r.status === 'rejected')
     const okCount = results.length - failed.length
@@ -333,6 +363,52 @@ async function batchControl(action) {
   // 板子约 5 秒上报真实状态，稍后刷新（同时立刻刷一次拿指令受理结果）
   fetchMapDevices()
   setTimeout(fetchMapDevices, 6000)
+}
+
+// ---- 单设备控制（弹窗按钮）：演示灯本地模拟，真实设备走后端 ----
+async function controlOne(id, action, popup) {
+  const d = devices.value.find(x => x.id === id)
+  if (!d) return
+  if (d.demo) {
+    d.mode = action === 'auto' ? 'auto' : 'manual'
+    if (action === 'on' || action === 'off') d.lamp = action
+    const m = markerMap.get(id)
+    if (m) {
+      m.setIcon(buildIcon(d))
+      m.setPopupContent(buildPopup(d))
+    }
+    ElMessage.success('演示灯已「' + (action === 'on' ? '开灯' : action === 'off' ? '关灯' : '恢复自动') + '」')
+  } else {
+    if ((d.status || '').toLowerCase() !== 'online') {
+      ElMessage.warning('设备离线，无法控制')
+      return
+    }
+    try {
+      await (USE_MOCK ? mockResponse({ success: true }) : controlLamp(id, action))
+      ElMessage.success('指令已下发')
+      fetchMapDevices()
+      setTimeout(fetchMapDevices, 6000)
+    } catch (e) {
+      ElMessage.error('下发失败：' + (e?.message || e))
+    }
+  }
+}
+
+// ---- 通知路灯管理员维修（notify:send：市政人员 / 系统管理员）----
+async function sendRepairNotice(id) {
+  const d = devices.value.find(x => x.id === id)
+  if (!d) return
+  try {
+    await createNotification({
+      title: '路灯异常-需维修',
+      content: `设备 ${d.name}（${d.id}）状态异常，请尽快排查维修。`,
+      device_id: id,
+      receiver_role: 'admin'
+    })
+    ElMessage.success('已通知路灯管理员')
+  } catch (e) {
+    ElMessage.error('通知失败：' + (e?.message || e))
+  }
 }
 
 // 初始化地图
@@ -356,12 +432,26 @@ async function initMap() {
   // 容器尺寸晚于地图初始化变化时，强制重算瓦片布局
   setTimeout(() => map.invalidateSize(), 200)
 
-  // 弹窗内"查看详情"按钮的事件委托（弹窗 DOM 由 Leaflet 动态创建）
+  // 弹窗内按钮事件委托（弹窗 DOM 由 Leaflet 动态创建）
   map.on('popupopen', (e) => {
-    const btn = e.popup.getElement()?.querySelector('.popup-detail-btn')
+    const el = e.popup.getElement()
+    const btn = el?.querySelector('.popup-detail-btn')
     if (btn) {
       btn.addEventListener('click', () => {
         router.push(`/device/${btn.dataset.id}`)
+      })
+    }
+    // 单设备控灯按钮
+    el?.querySelectorAll('.popup-btns .pbtn').forEach(b => {
+      b.addEventListener('click', () => {
+        controlOne(b.dataset.id, b.dataset.act, e.popup)
+      })
+    })
+    // 通知维修按钮
+    const repair = el?.querySelector('.popup-repair')
+    if (repair) {
+      repair.addEventListener('click', () => {
+        sendRepairNotice(repair.dataset.id)
       })
     }
   })
@@ -706,6 +796,7 @@ onBeforeUnmount(() => {
 }
 
 .map-card .lamp-pin {
+  position: relative;
   width: 22px;
   height: 22px;
   border-radius: 50%;
@@ -717,6 +808,42 @@ onBeforeUnmount(() => {
   box-shadow: 0 1px 4px rgba(31, 28, 25, 0.35);
   transition: transform 0.15s;
 }
+
+/* 异常设备：右上角三角警告角标 */
+.pin-warn {
+  position: absolute;
+  top: -9px;
+  right: -9px;
+  width: 16px;
+  height: 16px;
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
+  color: #E5484D;
+  font-size: 11px;
+  line-height: 16px;
+  text-align: center;
+  z-index: 2;
+}
+
+/* 弹窗内单设备控制按钮 */
+.popup-btns { display: flex; gap: 6px; margin: 10px 0 6px; }
+.popup-btns .pbtn {
+  flex: 1; border: none; border-radius: 6px; padding: 5px 0;
+  font-size: 12px; color: #fff; cursor: pointer; transition: opacity 0.15s;
+}
+.popup-btns .pbtn:hover { opacity: 0.85; }
+.popup-btns .pbtn.on { background: #0FA46E; }
+.popup-btns .pbtn.off { background: #78909C; }
+.popup-btns .pbtn.auto { background: #2F6FED; }
+
+/* 通知维修按钮 */
+.popup-repair {
+  width: 100%; margin-top: 8px; padding: 6px 0;
+  border: 1px solid #E5484D; background: #fff; color: #E5484D;
+  border-radius: 6px; font-size: 12px; cursor: pointer; transition: all 0.15s;
+}
+.popup-repair:hover { background: #E5484D; color: #fff; }
 
 .map-card .lamp-marker:hover .lamp-pin {
   transform: scale(1.25);

@@ -1,0 +1,77 @@
+
+> smart-street-light@0.0.0 dev
+> vite
+
+[2m14:32:12[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m Re-optimizing dependencies because lockfile has changed
+
+  [32m[1mVITE[22m v8.2.2[39m  [2mready in [0m[1m1716[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5173[22m/[39m
+[2m  [32m➜[39m  [1mNetwork[22m[2m: use [22m[1m--host[22m[2m to expose[22m
+[2m14:32:13[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [optimizer] bundling dependencies...
+[2m14:35:59[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/map/devices[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1339:18)
+    at afterConnectMultiple (node:net:1942:7)
+[2m14:36:10[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/map/devices[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1339:18)
+    at afterConnectMultiple (node:net:1942:7)
+[2m14:36:20[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/map/devices[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1339:18)
+    at afterConnectMultiple (node:net:1942:7)
+[2m14:36:30[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/map/devices[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1339:18)
+    at afterConnectMultiple (node:net:1942:7)
+[2m14:36:40[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/map/devices[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1339:18)
+    at afterConnectMultiple (node:net:1942:7)
+[2m14:36:50[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/map/devices[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1339:18)
+    at afterConnectMultiple (node:net:1942:7)
+[2m14:37:00[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/map/devices[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1339:18)
+    at afterConnectMultiple (node:net:1942:7)
+[2m14:59:29[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MapPage.vue[22m
+[2m14:59:33[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MapPage.vue[22m
+[2m14:59:37[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MapPage.vue[22m
+[2m14:59:41[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MapPage.vue[22m
+[2m15:19:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/devices[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1339:18)
+    at afterConnectMultiple (node:net:1942:7)
+[2m15:20:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/devices[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1339:18)
+    at afterConnectMultiple (node:net:1942:7)
+[2m15:21:44[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/devices[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1339:18)
+    at afterConnectMultiple (node:net:1942:7)
+[2m15:23:27[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MapPage.vue[22m
+[2m15:23:42[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MapPage.vue[22m
+[2m15:23:57[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MapPage.vue[22m
+[2m15:24:21[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MapPage.vue[22m
+[2m15:24:25[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MapPage.vue[22m
+[2m15:24:41[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/MapPage.vue?vue&type=style&index=1&lang.css[22m
+[2m15:25:56[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m15:26:02[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m15:26:07[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m15:26:20[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/App.vue?vue&type=style&index=0&scoped=7a7a37b1&lang.css[22m
+[2m15:26:59[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/DeviceList.vue[22m
+[2m15:27:03[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/DeviceList.vue[22m
+[2m15:34:30[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/App.vue[22m
+[2m15:39:27[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/Dashboard.vue, /src/components/DeviceStatusPie.vue, /src/components/LightTrendChart.vue, /src/components/DeviceCard.vue, /src/pages/DeviceList.vue, /src/pages/AlarmList.vue, /src/pages/ThresholdConfig.vue[22m
+[2m15:39:42[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/Dashboard.vue, /src/components/DeviceStatusPie.vue, /src/components/LightTrendChart.vue, /src/components/DeviceCard.vue, /src/pages/DeviceList.vue, /src/pages/AlarmList.vue, /src/pages/ThresholdConfig.vue[22m
+[2m15:39:51[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/Dashboard.vue, /src/components/DeviceStatusPie.vue, /src/components/LightTrendChart.vue, /src/components/DeviceCard.vue, /src/pages/DeviceList.vue, /src/pages/AlarmList.vue, /src/pages/ThresholdConfig.vue[22m
+[2m15:39:59[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/DeviceList.vue[22m
+[2m15:40:04[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/DeviceList.vue[22m
+[2m15:40:24[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/ThresholdConfig.vue[22m
+[2m15:40:40[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/Dashboard.vue, /src/components/DeviceStatusPie.vue, /src/components/LightTrendChart.vue, /src/components/DeviceCard.vue, /src/pages/DeviceList.vue, /src/pages/AlarmList.vue, /src/pages/ThresholdConfig.vue[22m
+[2m15:40:51[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/AlarmList.vue[22m
+[2m15:41:01[22m [36m[1m[vite][22m[39m [90m[2m(client)[22m[39m [32mhmr update [39m[2m/src/pages/DeviceList.vue[22m

@@ -55,6 +55,14 @@ const hasChanges = computed(() => {
 const fetchThreshold = async () => {
   if (!selectedDeviceId.value) return
 
+  // 演示灯：本地返回阈值（不调后端，避免 404）
+  const demoDev = deviceStore.deviceList.find(d => d.id === selectedDeviceId.value && d.demo)
+  if (demoDev) {
+    threshold.value = 90
+    originalThreshold.value = 90
+    return
+  }
+
   // 从 Store 获取配置
   await deviceStore.fetchThresholdConfig(selectedDeviceId.value)
 

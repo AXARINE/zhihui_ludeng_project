@@ -47,6 +47,46 @@ watch(() => route.path, () => {
     activeMenu.value = route.path
 })
 
+// ---- 通知中心（顶栏铃铛 + 未读红点 + 日报）----
+import { getUnreadCount, getNotifications, markNotificationRead, getTodayReport } from '@/api/notify'
+import { ElMessage } from 'element-plus'
+
+const unread = ref(0)
+const notifList = ref([])
+const notifVisible = ref(false)
+const reportVisible = ref(false)
+const reportData = ref(null)
+
+const hasToken = () => !!localStorage.getItem('token')
+
+async function refreshUnread() {
+    if (!hasToken()) return
+    try { unread.value = (await getUnreadCount()).unread || 0 } catch { /* 忽略 */ }
+}
+async function loadNotifications() {
+    if (!hasToken()) return
+    try {
+        notifList.value = (await getNotifications()) || []
+        refreshUnread()
+    } catch { /* 忽略 */ }
+}
+async function markRead(n) {
+    if (n.is_read) return
+    try { await markNotificationRead(n.id); n.is_read = true; refreshUnread() } catch { /* 忽略 */ }
+}
+async function openReport() {
+    try { reportData.value = await getTodayReport(); reportVisible.value = true }
+    catch (e) { ElMessage.error('日报获取失败：' + (e?.message || e)) }
+}
+function fmtNotifTime(iso) {
+    if (!iso) return ''
+    const d = new Date(iso)
+    const p = n => (n < 10 ? '0' : '') + n
+    return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+}
+refreshUnread()
+setInterval(refreshUnread, 30000)
+
 // ---- 登录页面不显示侧边栏 ----
 const showSidebar = computed(() => route.meta.public !== true)
 
@@ -181,9 +221,53 @@ function handleLogout() {
         </aside>
 
         <main class="main-content">
+            <!-- 通知铃铛 + 未读红点（所有已登录用户可见） -->
+            <div class="content-top">
+                <el-badge :value="unread" :hidden="unread === 0" :max="99" class="bell-wrap">
+                    <el-popover placement="bottom-end" :width="330" trigger="click" v-model:visible="notifVisible" @show="loadNotifications">
+                        <template #reference>
+                            <button class="bell-btn"><el-icon :size="18"><Bell /></el-icon></button>
+                        </template>
+                        <div class="notif-panel">
+                            <div class="notif-head">
+                                <span>通知中心</span>
+                                <button class="report-link" @click="openReport">📅 今日日报</button>
+                            </div>
+                            <div v-if="notifList.length === 0" class="notif-empty">暂无通知</div>
+                            <div v-for="n in notifList" :key="n.id" class="notif-item" :class="{ 'is-unread': !n.is_read }" @click="markRead(n)">
+                                <div class="notif-item-top">
+                                    <span class="notif-tag" :class="n.type">{{ n.type === 'report' ? '日报' : '维修' }}</span>
+                                    <span class="notif-title">{{ n.title }}</span>
+                                    <span v-if="!n.is_read" class="notif-dot"></span>
+                                </div>
+                                <div class="notif-content">{{ n.content }}</div>
+                                <div class="notif-time">{{ fmtNotifTime(n.created_at) }}</div>
+                            </div>
+                        </div>
+                    </el-popover>
+                </el-badge>
+            </div>
             <router-view />
         </main>
     </div>
+
+    <!-- 今日日报弹窗 -->
+    <el-dialog v-model="reportVisible" title="📅 每日日报" width="540" append-to-body>
+        <template v-if="reportData">
+            <div class="report-grid">
+                <div class="report-cell"><b>{{ reportData.content.devices_total }}</b><span>设备总数</span></div>
+                <div class="report-cell"><b>{{ reportData.content.devices_online }}</b><span>在线设备</span></div>
+                <div class="report-cell"><b>{{ reportData.content.lamp_on }}</b><span>亮灯数量</span></div>
+                <div class="report-cell"><b>{{ reportData.content.alarms_today }}</b><span>今日告警</span></div>
+                <div class="report-cell"><b>{{ reportData.content.alarms_unhandled }}</b><span>未处理告警</span></div>
+                <div class="report-cell"><b>{{ reportData.content.avg_lux }}</b><span>平均光照(lux)</span></div>
+                <div class="report-cell"><b>{{ reportData.content.reports_lux }}</b><span>光照上报次数</span></div>
+                <div class="report-cell"><b>{{ reportData.content.cmd_manual }}</b><span>手动指令</span></div>
+                <div class="report-cell"><b>{{ reportData.content.cmd_auto }}</b><span>自动指令</span></div>
+            </div>
+            <div class="report-foot">日报日期：{{ reportData.report_date }}（前一日数据）· 每天 09:00 自动更新</div>
+        </template>
+    </el-dialog>
 </template>
 
 <style scoped>
@@ -327,4 +411,60 @@ function handleLogout() {
     background-color: #faf9f5;
     overflow-y: auto;
 }
+
+/* ---- 通知铃铛 ---- */
+.content-top {
+    position: fixed;
+    top: 16px;
+    right: 20px;
+    z-index: 90;
+}
+.bell-btn {
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: 1px solid #E8ECF1;
+    background: #fff;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+    transition: box-shadow 0.15s;
+}
+.bell-btn:hover { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); }
+.notif-panel { max-height: 420px; overflow-y: auto; }
+.notif-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+    font-weight: 600;
+    font-size: 14px;
+}
+.report-link { border: none; background: none; color: #2F6FED; cursor: pointer; font-size: 12px; }
+.notif-item {
+    padding: 8px 10px;
+    border-radius: 8px;
+    margin-bottom: 6px;
+    background: #F7F9FC;
+    cursor: pointer;
+}
+.notif-item.is-unread { background: #EAF1FE; }
+.notif-item-top { display: flex; align-items: center; gap: 6px; }
+.notif-tag { font-size: 11px; padding: 1px 8px; border-radius: 8px; color: #fff; flex-shrink: 0; }
+.notif-tag.report { background: #2F6FED; }
+.notif-tag.alert { background: #E5484D; }
+.notif-title { font-size: 13px; font-weight: 500; flex: 1; }
+.notif-dot { width: 7px; height: 7px; border-radius: 50%; background: #E5484D; flex-shrink: 0; }
+.notif-content { font-size: 12px; color: #6B7280; margin: 4px 0; line-height: 1.5; }
+.notif-time { font-size: 11px; color: #9AA3AF; }
+.notif-empty { text-align: center; color: #9AA3AF; padding: 20px 0; font-size: 13px; }
+
+/* ---- 日报弹窗 ---- */
+.report-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+.report-cell { background: #F7F9FC; border-radius: 10px; padding: 12px; text-align: center; }
+.report-cell b { display: block; font-size: 22px; color: #2F6FED; }
+.report-cell span { font-size: 12px; color: #6B7280; }
+.report-foot { margin-top: 14px; font-size: 12px; color: #9AA3AF; text-align: center; }
 </style>

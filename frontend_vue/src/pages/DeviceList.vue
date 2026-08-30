@@ -41,6 +41,7 @@ const filters = ref({
 })
 
 const filteredDeviceList = computed(() => {
+  // 演示灯已由 deviceStore 统一合并（首页大屏/设备列表/阈值等全局可见）
   let list = deviceStore.deviceList
   if (filters.value.status) {
     list = list.filter(device => device.status === filters.value.status)
@@ -69,6 +70,11 @@ const editForm = ref({
 const isGcj02Input = ref(false)
 
 function handleEditDevice(device) {
+  // 演示灯为虚拟设备，不落库，不可编辑
+  if (device.demo) {
+    ElMessage.info('演示灯为虚拟设备，不可编辑（仅用于功能演示）')
+    return
+  }
   editForm.value = {
     id: device.id,
     name: device.name || '',

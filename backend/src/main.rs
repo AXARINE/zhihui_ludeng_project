@@ -2,6 +2,7 @@ mod api;
 mod assistant;
 mod auth;
 mod iothub;
+mod notify;
 mod openapi;
 #[cfg(test)]
 mod tests;
@@ -133,6 +134,9 @@ async fn async_main() -> anyhow::Result<()> {
         tokio::spawn(iothub::run(state.clone(), hub));
         tracing::info!("iothub poller started");
     }
+    // 每日日报定时任务（每天 09:00 生成，懒生成兜底）
+    tokio::spawn(notify::run(state.db.clone()));
+    tracing::info!("daily report task started");
 
     // 跨域白名单:ALLOWED_ORIGINS 逗号分隔(各项 trim、空项忽略);
     // 未设置或解析后为空则保持 Any 全开(开发默认值)
@@ -166,6 +170,7 @@ async fn async_main() -> anyhow::Result<()> {
 
     let app: Router = api::router(state.clone())
         .merge(auth::router(state.clone()))
+        .merge(notify::router(state.clone()))
         .merge(webhook::router(state.clone()))
         .merge(
             SwaggerUi::new("/docs")

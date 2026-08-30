@@ -36,6 +36,21 @@ import {
   mockResponse
 } from '@/mock/device'
 
+// 演示设备（测试用灯，不接真实硬件）—— 全局共享，所有模块可见
+import { DEMO_LAMPS } from '@/constants/demoLamps'
+
+// 演示告警（配合演示灯展示：demo_05 离线）
+const DEMO_ALARMS = [
+  {
+    id: -2,
+    device_id: 'demo_05',
+    type: 'offline',
+    message: '演示灯·思贤路2号 设备离线（演示告警）',
+    created_at: new Date(Date.now() - 3600 * 1000).toISOString(),
+    resolved_at: null
+  }
+]
+
 // ============================================
 // 开发模式标志
 // ============================================
@@ -178,8 +193,8 @@ export const useDeviceStore = defineStore('device', {
           res = await getDeviceList()
         }
 
-        // 【关键】统一转大写后再存进 store
-        this.deviceList = (res || []).map(normalizeDevice)
+        // 【关键】统一转大写后再存进 store；并合并演示灯（测试用灯，全局模块可见）
+        this.deviceList = [...(res || []).map(normalizeDevice), ...DEMO_LAMPS.map(normalizeDevice)]
         console.log('设备列表加载成功：', this.deviceList)
       } catch (error) {
         console.log('设备列表加载失败：', error)
@@ -205,7 +220,8 @@ export const useDeviceStore = defineStore('device', {
           res = await getAlarmList(params)
         }
 
-        this.alarmList = res
+        // 合并演示告警（配合演示灯，展示在告警列表）
+        this.alarmList = [...DEMO_ALARMS, ...(res || [])]
         console.log('告警列表加载成功：', this.alarmList)
       } catch (error) {
         console.log('告警列表加载失败：', error)
@@ -246,6 +262,15 @@ export const useDeviceStore = defineStore('device', {
     async controlDevice(deviceId, action) {
       try {
         console.log('控制设备：', deviceId, action)
+
+        // 演示灯：本地模拟控制（不调后端，避免 404）
+        const demoDev = this.deviceList.find(d => d.id === deviceId && d.demo)
+        if (demoDev) {
+          if (action === 'on') { demoDev.lamp = 'ON'; demoDev.mode = 'MANUAL' }
+          else if (action === 'off') { demoDev.lamp = 'OFF'; demoDev.mode = 'MANUAL' }
+          else if (action === 'auto') { demoDev.mode = 'AUTO' }
+          return
+        }
 
         if (USE_MOCK) {
           // 【开发阶段】模拟控制成功
