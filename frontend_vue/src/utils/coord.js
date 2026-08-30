@@ -12,6 +12,8 @@
  * 中国境外没有偏移，直接原样返回。
  */
 
+import formatcoords from 'formatcoords'
+
 const PI = Math.PI
 const A = 6378245.0                // 长半轴（克拉索夫斯基椭球）
 const EE = 0.00669342162296594323  // 偏心率平方
@@ -73,4 +75,48 @@ export function gcj02ToWgs84(lng, lat) {
   if (outOfChina(lng, lat)) return { lng, lat }
   const gcj = wgs84ToGcj02(lng, lat)
   return { lng: lng * 2 - gcj.lng, lat: lat * 2 - gcj.lat }
+}
+
+/**
+ * 度分秒（DMS）格式化 — 基于 formatcoords 库
+ *
+ * 库负责十进制度 → 度/分/秒的分解（compute 出 degreesInt/minutesInt/seconds），
+ * 这里只做三件事：中文方位（北纬/南纬、东经/西经）、两位补零、秒四舍五入进位。
+ */
+function dmsZh(values, positive, posName, negName) {
+  let d = values.degreesInt
+  let m = values.minutesInt
+  let s = Math.round(values.seconds * 100) / 100
+  if (s >= 60) { s -= 60; m += 1 }   // 59.995″ 四舍五入进位
+  if (m >= 60) { m -= 60; d += 1 }
+  const pad2 = n => String(n).padStart(2, '0')
+  const sStr = pad2(Math.floor(s)) + (s % 1 ? '.' + String(Math.round(s % 1 * 100)).padStart(2, '0') : '')
+  return `${positive ? posName : negName} ${d}°${pad2(m)}′${sStr}″`
+}
+
+/**
+ * 纬度 → DMS 带方位：31.0245 → 北纬 31°01′28.20″
+ */
+export function formatLatDms(lat) {
+  if (lat == null || Number.isNaN(Number(lat))) return ''
+  const c = formatcoords(Number(lat), 0)
+  return dmsZh(c.latValues, c.north, '北纬', '南纬')
+}
+
+/**
+ * 经度 → DMS 带方位：121.4372 → 东经 121°26′13.92″
+ */
+export function formatLngDms(lng) {
+  if (lng == null || Number.isNaN(Number(lng))) return ''
+  const c = formatcoords(0, Number(lng))
+  return dmsZh(c.lonValues, c.east, '东经', '西经')
+}
+
+/**
+ * 经纬度成对 → DMS 一行：北纬 31°01′28.20″ · 东经 121°26′13.92″
+ * 任一为 null 返回空串（调用方自行显示"未定位"）
+ */
+export function formatCoordDms(lat, lng) {
+  if (lat == null || lng == null) return ''
+  return `${formatLatDms(lat)} · ${formatLngDms(lng)}`
 }
