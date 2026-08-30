@@ -4,7 +4,7 @@
 
 ## 系统架构
 
-[<img src="archify/preview.png" alt="智慧路灯系统架构图:Vue 前端 + Rust 后端" width="100%"/>](https://axarine.github.io/zhihui_ludeng_project/vue-rust-frontend-backend.html)
+[<img src="archify/vue-rust.webp" alt="智慧路灯系统架构图:Vue 前端 + Rust 后端" width="100%"/>](https://axarine.github.io/zhihui_ludeng_project/vue-rust-frontend-backend.html)
 
 > 点击上图打开**交互式架构图**(浏览器直接渲染,支持缩放 / 聚焦 / 明暗主题与导出);规格见 [`archify/vue-rust.architecture.json`](archify/vue-rust.architecture.json)。
 
