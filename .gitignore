@@ -25,3 +25,7 @@ frontend_vue/node_modules/
 frontend_vue/dist/
 frontend_vue/vite-dev.pid
 node-win-x64/
+
+# 测试数据工具(tools/db-seeder)的 uv 虚拟环境与 Python 缓存
+tools/db-seeder/.venv/
+__pycache__/
