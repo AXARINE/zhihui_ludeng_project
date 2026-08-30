@@ -19,7 +19,7 @@ import { ElMessage } from 'element-plus'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { updateDevice } from '@/api/device'
 import { formatBeijingTime } from '@/utils/time'
-import { gcj02ToWgs84 } from '@/utils/coord'
+import { gcj02ToWgs84, formatCoordDms } from '@/utils/coord'
 
 const deviceStore = useDeviceStore()
 const router = useRouter()
@@ -202,6 +202,16 @@ onMounted(() => {
             {{ row.location || '-' }}
           </template>
         </el-table-column>
+        <el-table-column label="经纬度" min-width="200">
+          <template #default="{ row }">
+            <span
+              v-if="row.latitude != null && row.longitude != null"
+              class="coord-dms"
+              :title="`${row.latitude}, ${row.longitude}（WGS84）`"
+            >{{ formatCoordDms(row.latitude, row.longitude) }}</span>
+            <span v-else class="coord-none">未定位</span>
+          </template>
+        </el-table-column>
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)">
@@ -303,6 +313,17 @@ onMounted(() => {
 <style scoped>
 .device-list-page {
   padding: 24px;
+}
+
+.coord-dms {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: default;
+}
+
+.coord-none {
+  color: #b4ada3;
+  font-size: 12px;
 }
 
 .page-header {

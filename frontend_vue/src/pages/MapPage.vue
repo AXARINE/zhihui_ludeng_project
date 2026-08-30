@@ -10,24 +10,30 @@
  * - 未定位设备（无坐标）单独列出，不丢失
  * - RTS 式框选批量控灯：框选模式拖矩形选中多台，一键批量开/关/自动
  *   （Shift 追加选择，Esc 取消；后端无批量接口，前端逐台并发下发）
+ * - 手动移动定位：管理员可开启"移动定位"模式，直接拖拽点位到真实位置，
+ *   松手确认后经 GCJ-02 → WGS84 反算调 PATCH /api/devices/{id} 入库
+ *   （进入移动模式自动暂停轮询，防止刷新把拖到一半的点位拽回原位；
+ *    拖到地图边缘时自动平移跟随 —— Leaflet Marker 的 autoPan）
  *
  * 坐标系说明（重要）：
  * - 后端 /api/map/devices 返回 WGS84 坐标
  * - 高德底图是 GCJ-02，直接打点会偏移 100~700 米
  * - 渲染前统一经 utils/coord.js 的 wgs84ToGcj02 转换
+ * - 拖拽保存前用 gcj02ToWgs84 转回 WGS84（后端约定统一存 WGS84）
  *
- * 权限：查看需要 device:status（菜单已控制）；批量控灯需要 control:manual
+ * 权限：查看需要 device:status（菜单已控制）；批量控灯需要 control:manual；
+ * 移动定位需要 device:manage（路灯管理员 admin 及以上，市政人员不可见）
  */
 import { ref, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Select } from '@element-plus/icons-vue'
+import { Refresh, Select, Position } from '@element-plus/icons-vue'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import { getMapDevices, controlLamp } from '@/api/device'
+import { getMapDevices, controlLamp, updateDevice } from '@/api/device'
 import { createNotification } from '@/api/notify'
 import { mockMapDeviceList, mockResponse } from '@/mock/device'
-import { wgs84ToGcj02 } from '@/utils/coord'
+import { wgs84ToGcj02, gcj02ToWgs84, formatLatDms, formatLngDms } from '@/utils/coord'
 import { formatBeijingTime } from '@/utils/time'
 
 const router = useRouter()
@@ -50,6 +56,7 @@ function hasPerm(code) {
 const canControl = computed(() => hasPerm('control:manual'))
 // 是否可发起维修通知（市政人员 / 系统管理员）
 const canNotify = computed(() => hasPerm('notify:send'))
+const canRelocate = computed(() => hasPerm('device:manage'))
 
 // ---- 数据 ----
 const devices = ref([])
@@ -85,6 +92,11 @@ const batchLoading = ref(false)    // 批量指令下发中
 let selStart = null                // 框选起点（地图容器像素坐标）
 let selRect = null                 // 框选矩形图层
 
+// ---- 手动移动定位（device:manage） ----
+const moveMode = ref(false)        // 移动定位模式：点位可拖拽，松手确认入库
+let draggingId = null              // 正在被拖拽的设备 ID（轮询刷新时跳过它）
+let dragOrigin = null              // 拖拽起点（GCJ-02 latlng），取消保存时回弹
+
 // 简易 HTML 转义（设备名/位置是用户输入，防注入）
 function escapeHtml(s) {
   return String(s ?? '')
@@ -118,6 +130,12 @@ function buildIcon(d) {
   })
 }
 
+// 弹窗坐标行：北纬/东经各一行（度分秒）；鼠标悬停 title 显示十进制原始值
+function formatLatLine(d) {
+  if (d.latitude == null || d.longitude == null) return '未定位'
+  return `${formatLatDms(d.latitude)}<br>${formatLngDms(d.longitude)}`
+}
+
 // 构建弹窗内容：单设备控制 + 异常设备"通知维修"按钮
 function buildPopup(d) {
   const status = (d.status || '').toLowerCase()
@@ -140,6 +158,7 @@ function buildPopup(d) {
       <div class="popup-title">${escapeHtml(d.name || d.id)}</div>
       <div class="popup-row"><span>设备ID</span><code>${escapeHtml(d.id)}</code></div>
       <div class="popup-row"><span>位置</span><span>${escapeHtml(d.location) || '-'}</span></div>
+      <div class="popup-row"><span>坐标</span><span class="popup-coord" title="${d.latitude}, ${d.longitude}（WGS84）">${formatLatLine(d)}</span></div>
       <div class="popup-row"><span>状态</span><span class="popup-tag ${statusCls}">${statusText}</span></div>
       <div class="popup-row"><span>灯态</span><span>${lampText}</span></div>
       <div class="popup-row"><span>模式</span><span>${modeText}</span></div>
@@ -189,12 +208,40 @@ function renderMarkers() {
     let marker = markerMap.get(d.id)
 
     if (!marker) {
-      marker = L.marker(latlng, { icon: buildIcon(d), title: d.name || d.id })
+      marker = L.marker(latlng, {
+        icon: buildIcon(d),
+        title: d.name || d.id,
+        // 拖拽定位时点位贴近边缘，地图自动平移跟随（仅拖拽中生效，平时无副作用）
+        autoPan: true,
+        autoPanPadding: [60, 60],
+        autoPanSpeed: 8
+      })
+      marker.deviceId = d.id
+      // 拖拽改定位（仅 moveMode 下 dragging 才被 enable，处理器常挂无副作用）
+      marker.on('dragstart', () => {
+        draggingId = d.id
+        dragOrigin = { id: d.id, latlng: marker.getLatLng() }
+        // 常驻 tooltip 实时显示拖拽位置（度分秒经纬度）
+        marker.bindTooltip('', {
+          permanent: true, direction: 'top',
+          offset: [0, -14], className: 'drag-coord-tip'
+        }).openTooltip()
+      })
+      marker.on('drag', () => {
+        const p = marker.getLatLng()
+        const w = gcj02ToWgs84(p.lng, p.lat)
+        marker.setTooltipContent(`${formatLatDms(w.lat)} · ${formatLngDms(w.lng)}`)
+      })
+      marker.on('dragend', () => {
+        marker.unbindTooltip()
+        onMarkerDragEnd(marker)
+      })
       marker.addTo(map)
       marker.bindPopup(buildPopup(d))
       markerMap.set(d.id, marker)
     } else {
-      marker.setLatLng(latlng)
+      // 正在拖拽的点位不动（虽然移动模式下已停轮询，防手动刷新干扰）
+      if (d.id !== draggingId) marker.setLatLng(latlng)
       marker.setIcon(buildIcon(d))
       marker.setPopupContent(buildPopup(d))
     }
@@ -223,6 +270,11 @@ function refreshMarkerStyles() {
 
 // ---- 框选模式：进入/退出 ----
 function toggleBoxSelect() {
+  // 与移动定位模式互斥：进入框选先退出移动模式
+  if (!boxSelectMode.value && moveMode.value) {
+    moveMode.value = false
+    applyMoveMode()
+  }
   boxSelectMode.value = !boxSelectMode.value
   applyBoxSelectMode()
 }
@@ -248,6 +300,84 @@ function clearSelRect() {
     selRect = null
   }
   selStart = null
+}
+
+// ---- 手动移动定位：进入/退出 ----
+function toggleMoveMode() {
+  // 与框选模式互斥：进入移动模式先退出框选
+  if (!moveMode.value && boxSelectMode.value) {
+    boxSelectMode.value = false
+    applyBoxSelectMode()
+  }
+  moveMode.value = !moveMode.value
+  applyMoveMode()
+}
+
+function applyMoveMode() {
+  if (!map) return
+  const container = map.getContainer()
+  if (moveMode.value) {
+    map.closePopup()
+    container.classList.add('move-mode')
+    for (const [, marker] of markerMap) marker.dragging?.enable()
+    stopPolling()   // 停轮询：防止刷新把拖到一半的点位重置回旧坐标
+  } else {
+    container.classList.remove('move-mode')
+    for (const [, marker] of markerMap) marker.dragging?.disable()
+    draggingId = null
+    dragOrigin = null
+    if (autoRefresh.value) startPolling()   // 恢复原轮询状态
+  }
+}
+
+// 取消/失败时把点位回弹到拖拽前的位置
+function revertMarker(id) {
+  if (!dragOrigin || dragOrigin.id !== id) return
+  const marker = markerMap.get(id)
+  if (marker) marker.setLatLng(dragOrigin.latlng)
+  dragOrigin = null
+}
+
+// 拖拽松手：确认 → GCJ-02 反算 WGS84 → PATCH 入库；取消则回弹
+async function onMarkerDragEnd(marker) {
+  const id = marker.deviceId
+  const d = devices.value.find(x => x.id === id)
+  draggingId = null
+  if (!d) { dragOrigin = null; return }
+
+  const gcj = marker.getLatLng()
+  const wgs = gcj02ToWgs84(gcj.lng, gcj.lat)
+  const lat = Number(wgs.lat.toFixed(6))
+  const lng = Number(wgs.lng.toFixed(6))
+
+  try {
+    await ElMessageBox.confirm(
+      `将「${d.name || d.id}」的定位修改为：<br><b>${formatLatDms(lat)} · ${formatLngDms(lng)}</b><br>` +
+      `<code>${lat}, ${lng}</code>（WGS84）`,
+      '修改设备定位',
+      {
+        type: 'warning',
+        dangerouslyUseHTMLString: true,
+        confirmButtonText: '保存',
+        cancelButtonText: '取消'
+      }
+    )
+  } catch {
+    revertMarker(id)
+    return
+  }
+
+  try {
+    if (USE_MOCK) await mockResponse({ success: true })
+    else await updateDevice(id, { latitude: lat, longitude: lng })
+    d.latitude = lat
+    d.longitude = lng
+    dragOrigin = null
+    ElMessage.success(`「${d.name || d.id}」定位已更新`)
+  } catch (e) {
+    ElMessage.error('定位更新失败：' + (e?.response?.data || e.message))
+    revertMarker(id)
+  }
 }
 
 function clearSelection() {
@@ -307,7 +437,7 @@ function onSelMouseUp(e) {
   refreshMarkerStyles()
 }
 
-// Esc 取消选择 / 退出框选模式
+// Esc 取消选择 / 退出框选模式 / 退出移动定位模式
 function onKeydown(e) {
   if (e.key !== 'Escape') return
   if (selectedIds.value.length > 0) {
@@ -315,6 +445,9 @@ function onKeydown(e) {
   } else if (boxSelectMode.value) {
     boxSelectMode.value = false
     applyBoxSelectMode()
+  } else if (moveMode.value) {
+    moveMode.value = false
+    applyMoveMode()
   }
 }
 
@@ -511,8 +644,8 @@ onBeforeUnmount(() => {
     <div class="map-card">
       <div id="map-container" v-loading="loading"></div>
 
-      <!-- 框选/批量控制条：顶部中间（需要 control:manual 权限） -->
-      <div class="float-panel batch-bar" v-if="canControl">
+      <!-- 顶部工具条：框选批量控制 / 移动定位（按权限显示对应入口） -->
+      <div class="float-panel batch-bar" v-if="canControl || canRelocate">
         <template v-if="boxSelectMode && selectedIds.length === 0">
           <span class="batch-hint">拖动框选设备 · Shift 加选 · Esc 退出</span>
           <el-button size="small" @click="toggleBoxSelect">退出框选</el-button>
@@ -524,8 +657,13 @@ onBeforeUnmount(() => {
           <el-button size="small" type="warning" plain :disabled="batchLoading" @click="batchControl('auto')">恢复自动</el-button>
           <el-button size="small" :disabled="batchLoading" @click="clearSelection">取消</el-button>
         </template>
+        <template v-else-if="moveMode">
+          <span class="batch-hint">拖动点位修改定位 · Esc 退出</span>
+          <el-button size="small" @click="toggleMoveMode">退出</el-button>
+        </template>
         <template v-else>
-          <el-button size="small" :icon="Select" @click="toggleBoxSelect">框选控制</el-button>
+          <el-button size="small" :icon="Select" @click="toggleBoxSelect" v-if="canControl">框选控制</el-button>
+          <el-button size="small" :icon="Position" type="warning" plain @click="toggleMoveMode" v-if="canRelocate">移动定位</el-button>
         </template>
       </div>
 
@@ -735,6 +873,13 @@ onBeforeUnmount(() => {
   cursor: crosshair;
 }
 
+/* 移动定位模式：点位显示可拖光标 */
+#map-container.move-mode .lamp-marker,
+#map-container.move-mode .lamp-pin,
+#map-container.move-mode .pin-label {
+  cursor: move;
+}
+
 /* 图例：左下 */
 .legend-panel {
   bottom: 12px;
@@ -938,6 +1083,20 @@ onBeforeUnmount(() => {
 .popup-row code {
   font-family: var(--font-mono);
   font-size: 12px;
+}
+
+.popup-coord {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-align: right;
+  line-height: 1.5;
+}
+
+/* 拖拽定位时的实时坐标提示 */
+.map-card .drag-coord-tip {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .popup-tag {

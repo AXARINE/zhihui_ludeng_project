@@ -12,6 +12,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useDeviceStore } from '@/stores/deviceStore'
 import { updateDevice } from '@/api/device'
+import { formatCoordDms } from '@/utils/coord'
 import { formatBeijingTime } from '@/utils/time'
 
 const deviceStore = useDeviceStore()
@@ -129,6 +130,13 @@ onMounted(() => {
         <el-descriptions-item label="设备ID">{{ device.id }}</el-descriptions-item>
         <el-descriptions-item label="设备名称">{{ device.name }}</el-descriptions-item>
         <el-descriptions-item label="位置">{{ device.location || '-' }}</el-descriptions-item>
+        <el-descriptions-item label="经纬度">
+          <template v-if="device.latitude != null && device.longitude != null">
+            <div>{{ formatCoordDms(device.latitude, device.longitude) }}</div>
+            <div class="coord-decimal">{{ device.latitude.toFixed(6) }}, {{ device.longitude.toFixed(6) }}（WGS84）</div>
+          </template>
+          <template v-else>未定位</template>
+        </el-descriptions-item>
         <el-descriptions-item label="灯状态">
           <span :class="device.lamp === 'ON' ? 'lamp-on' : 'lamp-off'">
             {{ device.lamp === 'ON' ? '💡 已开启' : '🌑 已关闭' }}
@@ -213,6 +221,12 @@ onMounted(() => {
 <style scoped>
 .device-detail-page {
   padding: 24px;
+}
+
+.coord-decimal {
+  font-size: 12px;
+  color: #8a837b;
+  font-family: var(--font-mono);
 }
 
 .back-button {
