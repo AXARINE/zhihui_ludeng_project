@@ -143,6 +143,9 @@ macro_rules! text_enum {
     };
 }
 
+// 供其他模块(如 notify)复用同一封闭取值枚举生成模式
+pub(crate) use text_enum;
+
 text_enum! {
     /// 设备在线状态(`device.status`,由轮询器写入 online/offline)
     DeviceStatus { Online => "online", Offline => "offline" }

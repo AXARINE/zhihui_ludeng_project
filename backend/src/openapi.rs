@@ -1,6 +1,6 @@
 //! OpenAPI/Swagger 文档:汇总各模块带 `#[utoipa::path]` 注解的 handler
 //! 新增的api请放在这里
-use crate::{api, auth, webhook};
+use crate::{api, auth, notify, report, webhook};
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]
@@ -32,6 +32,11 @@ use utoipa::OpenApi;
         api::list_audit_logs,
         api::dashboard,
         api::assistant_ask,
+        notify::create_notification,
+        notify::list_notifications,
+        notify::unread_count,
+        notify::mark_read,
+        report::report_today,
         auth::login,
         auth::me,
         auth::list_users,

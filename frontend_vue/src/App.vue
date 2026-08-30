@@ -56,6 +56,8 @@ const notifList = ref([])
 const notifVisible = ref(false)
 const reportVisible = ref(false)
 const reportData = ref(null)
+// 尚无日报(后端 404):弹窗内显示空态而非报错 toast
+const reportEmpty = ref(false)
 
 const hasToken = () => !!localStorage.getItem('token')
 
@@ -75,8 +77,20 @@ async function markRead(n) {
     try { await markNotificationRead(n.id); n.is_read = true; refreshUnread() } catch { /* 忽略 */ }
 }
 async function openReport() {
-    try { reportData.value = await getTodayReport(); reportVisible.value = true }
-    catch (e) { ElMessage.error('日报获取失败：' + (e?.message || e)) }
+    reportVisible.value = true
+    reportData.value = null
+    reportEmpty.value = false
+    try {
+        reportData.value = await getTodayReport()
+    } catch (e) {
+        if (e?.response?.status === 404) {
+            // 日报尚未生成:保持弹窗打开,展示空态
+            reportEmpty.value = true
+        } else {
+            reportVisible.value = false
+            ElMessage.error('日报获取失败：' + (e?.response?.data || e?.message || e))
+        }
+    }
 }
 function fmtNotifTime(iso) {
     if (!iso) return ''
@@ -266,6 +280,13 @@ function handleLogout() {
                 <div class="report-cell"><b>{{ reportData.content.cmd_auto }}</b><span>自动指令</span></div>
             </div>
             <div class="report-foot">日报日期：{{ reportData.report_date }}（前一日数据）· 每天 09:00 自动更新</div>
+        </template>
+        <template v-else-if="reportEmpty">
+            <div class="report-empty">
+                <div class="report-empty-icon">📭</div>
+                <div class="report-empty-title">暂无日报</div>
+                <div class="report-empty-tip">日报在每天 09:00(北京时间)后生成前一日数据,请稍后再来</div>
+            </div>
         </template>
     </el-dialog>
 </template>
@@ -467,4 +488,8 @@ function handleLogout() {
 .report-cell b { display: block; font-size: 22px; color: #2F6FED; }
 .report-cell span { font-size: 12px; color: #6B7280; }
 .report-foot { margin-top: 14px; font-size: 12px; color: #9AA3AF; text-align: center; }
+.report-empty { padding: 28px 0 18px; text-align: center; }
+.report-empty-icon { font-size: 40px; }
+.report-empty-title { margin-top: 10px; font-size: 15px; font-weight: 600; color: #4B5563; }
+.report-empty-tip { margin-top: 8px; font-size: 12px; color: #9AA3AF; }
 </style>
