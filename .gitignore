@@ -8,6 +8,7 @@ compile_commands.json
 # 临时与系统垃圾文件
 *.tmp
 *~
+*.log
 .tools/
 .DS_Store
 Thumbs.db
