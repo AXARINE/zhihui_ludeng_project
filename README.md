@@ -19,12 +19,13 @@
 | 光照监测 | BH1750 实时采集（50ms 采样，L-res 模式），5 点滑动窗口混合滤波（中值+均值，抑制 ±1000lx 级跳变），`Luminance`/`LightStatus` 每 5s 上报，历史数据落库 |
 | 自动控制 | **固件本地施密特触发**：迟滞带 + 扣除补光灯自照度 + 连续 1s 确认，防自反馈频闪；阈值由云端下发 |
 | 手动控制 | 前端/API 下发 `Light_Control_Led`（ON/OFF/AUTO），命令经 IoTDA 下发并留痕 |
+| PWM 调光 | GPIO7 复用 PWM0（10kHz 载波，γ=2.2 感知亮度校正）；云端设 `Brightness`(0~100，设值即手动）;auto 模式支持可配置照度-亮度曲线 `DimCurve`(≤4 锚点分段线性插值，空串回退阈值开关）；`GET/PUT /api/devices/{id}/dimming` |
 | 阈值配置 | 云端可读可写属性 `Threshold`（int），下发后固件立即生效 |
 | 在线检测 | IoTDA 状态 + **90s 本地失联检测**（心跳 = IoTDA 平台事件时间，单调前进） |
 | 离线告警 | 断连自动产生 `offline` 告警（去重）、恢复自动消解；支持人工标记已处理/恢复 |
 | 设备管理 | 设备注册/编辑/删除（级联清数据）、查看在线状态与灯态 |
 | 仪表盘 | 首页聚合：设备总数/在线/开灯数、未处理告警、24h 光照均值、指令数 |
-| 账号与 RBAC | JWT + Argon2id；`municipal`（市政）/ `admin`（路灯管理员）/ `super_admin`（系统管理员）三角色 + 13 个权限点，权限可在线调整 |
+| 账号与 RBAC | JWT + Argon2id；`municipal`（市政）/ `admin`（路灯管理员）/ `super_admin`（系统管理员）三角色 + 15 个权限点，权限可在线调整 |
 | 审计日志 | 用户/角色/阈值变更写 `audit_log`，控灯指令归因 `command_record.operator_id`，`GET /api/audit-logs` 查询 |
 | 智能问答 | 本地检索式维护助手：意图识别 + 实体/时间窗抽取 + 查库 + 模板回答（不依赖外部大模型） |
 | Swagger UI | `http://127.0.0.1:8080/docs` 在线调试全部接口 |
@@ -115,16 +116,16 @@ cp app_config.example.h app_config.h
 #define CONFIG_APP_DEVICEPWD "..."           // 设备密钥
 ```
 
-IoTDA 实例**设备侧**域名（`CONFIG_APP_SERVERIP`）在 `e53_sc1_example.c` 顶部，形如 `xxx.st1.iotda-device.cn-south-1.myhuaweicloud.com`。产品模型 `Light`：属性 `Luminance`(int) + `LightStatus`(string) 每 5s 上报；命令 `Light_Control_Led`（Led=ON/OFF/AUTO）；可写属性 `Threshold`(int，**必须"可读可写"**，否则下发报 IOTDA.000029)。
+IoTDA 实例**设备侧**域名（`CONFIG_APP_SERVERIP`）在 `e53_sc1_example.cpp` 顶部，形如 `xxx.st1.iotda-device.cn-south-1.myhuaweicloud.com`。产品模型 `Light`：属性 `Luminance`(int) + `LightStatus`(string) + `Brightness`(int,0~100) 每 5s 上报；命令 `Light_Control_Led`（Led=ON/OFF/AUTO）；可写属性 `Threshold`(int)、`Brightness`(int 0~100)、`DimCurve`(string ≤64)（**全部必须"可读可写"**，否则下发报 IOTDA.000029)。
 
 ## 项目结构
 
 ```
-├── C3_e53_sc1_pls/            # 固件源码（权威副本，改固件改这里）
-│   ├── e53_sc1_example.c      # 主逻辑：Wi-Fi → oc_mqtt 连 IoTDA、下行命令/属性、双任务
-│   ├── src/E53_SC1.c          # BH1750 传感器 + 补光灯 GPIO7
-│   ├── src/wifi_connect.c     # Wi-Fi 连接（复制自官方 D5/D9）
-│   └── include/               # app_config.h（真实凭据，.gitignore 忽略）
+├── C3_e53_sc1_pls/            # 固件源码（权威副本，改固件改这里；2026-08-31 起为 C++）
+│   ├── e53_sc1_example.cpp    # 主逻辑：Wi-Fi → oc_mqtt 连 IoTDA、下行命令/属性、双任务、调光曲线
+│   ├── src/E53_SC1.cpp        # BH1750 传感器 + 补光灯 GPIO7/PWM0 调光
+│   ├── src/wifi_connect.cpp   # Wi-Fi 连接（复制自官方 D5/D9）
+│   └── include/               # app_config.h（真实凭据，.gitignore 忽略）+ sdk_cxx.h（SDK 头封装）
 ├── bearpi-hm_nano/            # OpenHarmony 源码树（git submodule，编译目标；勿直接改 sample/）
 ├── backend/                   # Rust 后端
 │   ├── src/                   # main/api/auth/iothub/assistant/openapi/webhook + tests

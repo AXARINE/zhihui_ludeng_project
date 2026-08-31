@@ -38,7 +38,7 @@ Rust 后端(axum, 8080) --> PostgreSQL(Docker)
 |---|---|---|
 | Wi-Fi SSID / 密码 | 固件 `app_config.h` | 自备(2.4G) |
 | IoTDA 设备 ID / 设备密钥 | 固件 `app_config.h` | 控制台 → 注册设备 |
-| IoTDA 实例**设备侧域名** | 固件 `e53_sc1_example.c` 顶部 `CONFIG_APP_SERVERIP` | 控制台 → 实例 → 接入信息 |
+| IoTDA 实例**设备侧域名** | 固件 `e53_sc1_example.cpp` 顶部 `CONFIG_APP_SERVERIP` | 控制台 → 实例 → 接入信息 |
 | IoTDA 实例**应用侧域名** | 后端 `.env` 的 `HUAWEI_IOTDA_ENDPOINT` | 同上 |
 | 项目 ID | 后端 `.env` | 我的凭证 → 项目列表(对应区域行) |
 | AK / SK | 后端 `.env` | 我的凭证 → 访问密钥(或 IAM 用户) |
@@ -62,8 +62,12 @@ Rust 后端(axum, 8080) --> PostgreSQL(Docker)
 |---|---|---|---|---|
 | 属性 | `Luminance` | int | 只读 | 光照值,设备每 5s 上报 |
 | 属性 | `LightStatus` | string | 只读 | 灯态(ON/OFF) |
+| 属性 | `Brightness` | int | **可读可写** | 当前输出亮度 0~100;设备每 5s 上报,云端设值即手动调光(0=关灯);⚠️ 不勾"可写"会导致下发报 IOTDA.000029 |
+| 属性 | `DimCurve` | string(长度 ≥64) | **可读可写** | auto 模式照度-亮度曲线,格式 `lux:pct,lux:pct,...`(≤4 点、lux 严格递增,如 `0:100,150:60,300:0`);空串=停用曲线回退阈值开关 |
 | 属性 | `Threshold` | int | **可读可写** | 开关灯阈值(0~10000);⚠️ 不勾"可写"会导致下发报 IOTDA.000029 |
 | 命令 | `Light_Control_Led` | 参数 `Led`:string,枚举 ON/OFF/AUTO | — | 控灯/恢复自动 |
+
+> 注意:固件会上报 `Brightness` 属性,若产品模型缺少该字段,上报整条被拒(Luminance 也会断流)。**先加产品模型字段,再烧录新固件**。
 
 ### 3.3 注册设备
 
@@ -97,7 +101,7 @@ cd zhihui_ludeng_project
 ### 4.2 配置凭据
 
 1. 复制模板:`cp C3_e53_sc1_pls/include/app_config.example.h C3_e53_sc1_pls/include/app_config.h`,填入 Wi-Fi SSID/密码与设备 ID/密钥(该文件被 `.gitignore` 忽略,**不会进 git**;`build.sh` 会自动把它写入源码树)。
-2. 编辑 `C3_e53_sc1_pls/e53_sc1_example.c` 顶部,把 `CONFIG_APP_SERVERIP` 改为**你的实例设备侧域名**。
+2. 编辑 `C3_e53_sc1_pls/e53_sc1_example.cpp` 顶部,把 `CONFIG_APP_SERVERIP` 改为**你的实例设备侧域名**。
    - 端口保持 `1883`:⚠️ **不要改 8883 MQTTS**——本工程 iot_link 内置 mbedtls 在 Hi3861 上运行 TLS 不稳定(证书解析阶段内核异常、订阅最长 90s 超时、断开清理 panic,设备重启循环、命令下发超时 IOTDA.014111)。根 CA 保留在 `include/iotda_ca.h` 备用,问题解决前勿启用。
 
 ### 4.3 编译与烧录(WSL 内)

@@ -192,6 +192,8 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 | `control:linkage` | 光照联动 | 预留；联动在固件本地执行，后端暂不消费 |
 | `control:manual` | 手动控灯 | `POST /api/devices/{id}/lamp` |
 | `config:threshold` | 阈值设置 | 阈值查询/修改 |
+| `config:dimming` | 调光设置 | 手动亮度与照度-亮度曲线查询/修改 |
+| `notify:send` | 发送维修通知 | `POST /api/notifications`（municipal / super_admin） |
 | `device:status` | 设备状态 | 设备列表、仪表盘 |
 | `alarm:offline` | 离线告警 | 预留；离线告警由轮询任务自动生成 |
 | `device:manage` | 设备管理 | 设备增删改 |
@@ -260,6 +262,8 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 | POST | `/api/devices/{id}/lamp` | `control:manual` | 开灯/关灯/自动（下发 IoTDA） | 202 |
 | GET | `/api/devices/{id}/threshold` | `config:threshold` | 查询阈值（未配置返回 40） | 200 |
 | PUT | `/api/devices/{id}/threshold` | `config:threshold` | 更新阈值并下发 IoTDA | 204 |
+| GET | `/api/devices/{id}/dimming` | `config:dimming` | 查询调光配置（默认亮度 100、无曲线） | 200 |
+| PUT | `/api/devices/{id}/dimming` | `config:dimming` | 设置手动亮度/照度-亮度曲线并下发 IoTDA | 204 |
 | GET | `/api/devices/{id}/commands` | `command:log` | 单设备指令留痕 | 200 |
 | GET | `/api/commands` | `command:log` | 全局指令留痕 | 200 |
 | GET | `/api/alarms` | `alarm:log` | 告警列表（可多条件过滤） | 200 |
@@ -447,6 +451,21 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 
 先 upsert 到本地 `config` 表，再调 IoTDA 北向 `PUT .../properties` 下发 `Threshold`。注意：如果本地库已写入但北向下发失败，接口返回 502，本地值会保留（当前实现如此，调试时留意两端一致性）。
 
+**GET /api/devices/{id}/dimming**：查询调光配置；数据库没有配置记录时返回默认 `{ "brightness": 100, "dim_curve": "" }`。
+
+**PUT /api/devices/{id}/dimming**
+
+```jsonc
+// 两字段至少给一个,都是可选的
+{ "brightness": 30,                  // 手动亮度 0~100;设备收到后进入 manual 模式,0 = 手动关灯
+  "dim_curve": "0:100,150:60,300:0"  // auto 模式照度-亮度曲线:≤4 个 lux:pct 锚点,
+                                     // lux 严格递增 0~100000,分段线性插值;空串 = 停用曲线,
+                                     // 回退固件原有阈值开关逻辑
+}
+```
+
+与阈值同序:先落库 `config`(只更新出现的列),再经 IoTDA 北向 `PUT .../properties` 下发 `Brightness`/`DimCurve` 属性,最后写审计 `config.dimming`。**前提:产品模型 `Light` 服务已在 IoTDA 控制台添加 `Brightness`(int 0~100)与 `DimCurve`(string 长度 64)两个"可读可写"属性**,否则下发报 IOTDA.000029。
+
 ### 5.8 指令留痕
 
 - `GET /api/devices/{id}/commands?from=&to=&limit=`
@@ -518,11 +537,11 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 |---|---|---|
 | `device` | 已注册设备与实时状态 | `id`(PK), `status`, `lamp`, `mode`, `last_seen_at`, `latitude/longitude`(WGS84,可空,0006) |
 | `lux_record` | 光照历史 | 自增 id，`device_id + created_at` 索引 |
-| `config` | 每设备阈值 | `device_id`(PK), `threshold` 默认 40 |
+| `config` | 每设备阈值与调光配置 | `device_id`(PK), `threshold` 默认 40；`brightness` 默认 100、`dim_curve` 默认空(0008) |
 | `alarm` | 告警 | `type`, `message`, `resolved_at`（非空=已处理） |
 | `command_record` | 控制指令留痕 | `action/source/status/message`，`device_id + created_at` 索引 |
 | `role` | 角色 | `municipal` / `admin` / `super_admin` |
-| `permission` | 权限点 | 13 个 `perm_code` |
+| `permission` | 权限点 | 15 个 `perm_code` |
 | `role_permission` | 角色-权限映射 | `(role_id, permission_id)` 唯一，级联删除 |
 | `app_user` | 登录账号 | `password_hash`（Argon2id），`status` 0/1 |
 | `maintenance_knowledge` | 问答知识库 | `keyword/cause/suggestion` 种子数据 |
@@ -603,6 +622,7 @@ string_to_sign = "V11-HMAC-SHA256\n{sdk_date}\n{info}\n{sha256(canonical_request
 | `shadow` | GET `/v5/iot/{project}/devices/{id}/shadow` | 取 `Light` 服务 reported 属性 |
 | `control_led` | POST `/v5/iot/{project}/devices/{id}/commands` | 下发 `Light_Control_Led` |
 | `set_threshold` | PUT `/v5/iot/{project}/devices/{id}/properties` | 下发 `Threshold` |
+| `set_dimming` | PUT `/v5/iot/{project}/devices/{id}/properties` | 下发 `Brightness`/`DimCurve`(只放出现的键) |
 
 - HTTP 客户端超时 35s：IoTDA 命令同步等待设备响应，超时太短会误判失败。
 - 非 2xx 时把状态码和华为云响应体一起放进错误（`BAD_GATEWAY`），方便排查 IOTDA 错误码。
