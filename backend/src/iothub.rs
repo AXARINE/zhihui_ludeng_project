@@ -2,12 +2,14 @@ use futures::StreamExt;
 use hmac::{Hmac, KeyInit, Mac};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use sha2::{Digest, Sha256};
+use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 
 use crate::AppState;
 use crate::api::LampAction;
+use crate::notify;
 
 type HmacSha256 = Hmac<Sha256>;
 
@@ -150,6 +152,31 @@ struct DeviceInfo {
     status: OnlineStatus,
 }
 
+/// 灵活搜索设备列表(`POST /search/query-devices`)的响应视图:
+/// `devices` = 本页条目,`count` = 满足条件的总条数(华为云 SDK `SearchDevicesResponse`)
+#[derive(serde::Deserialize)]
+struct SearchDevicesResponse {
+    #[serde(default)]
+    devices: Vec<DeviceListItem>,
+    #[serde(default)]
+    count: i64,
+}
+
+#[derive(serde::Deserialize)]
+struct DeviceListItem {
+    device_id: String,
+    #[serde(default)]
+    device_name: Option<String>,
+}
+
+/// SQL 检索单页行数(华为云 API 上限 50)
+const SEARCH_PAGE_ROWS: u32 = 50;
+/// SQL 检索 offset 硬上限(华为云 API 限制 500)
+const MAX_SQL_OFFSET: u32 = 500;
+
+/// 设备自动同步默认间隔:30 分钟
+const DEFAULT_SYNC_INTERVAL_SECS: u64 = 1800;
+
 /// 非 2xx 时把状态码与响应体(华为云错误信息在 body 里)带进错误
 async fn ensure_success(
     resp: reqwest::Response,
@@ -166,6 +193,23 @@ async fn ensure_success(
 /// 4xx 是请求/鉴权本身有问题,重试无意义
 pub fn is_retryable(status: Option<reqwest::StatusCode>) -> bool {
     status.is_none_or(|s| s.is_server_error())
+}
+
+/// 布尔型环境变量:`1`/`true`/`TRUE`/`yes`/`on` 为真,其余(含未设置)为假
+fn env_flag(key: &str) -> bool {
+    matches!(
+        std::env::var(key).ok().as_deref(),
+        Some("1" | "true" | "TRUE" | "yes" | "on")
+    )
+}
+
+/// 读取正整数环境变量,缺失/非法/为 0 时回落默认值
+fn env_u64_secs(key: &str, default: u64) -> u64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .filter(|&s| s > 0)
+        .unwrap_or(default)
 }
 
 impl IothubClient {
@@ -214,10 +258,7 @@ impl IothubClient {
                 .build()?,
             creds: Credentials::new(ak, sk, region, endpoint),
             project_id,
-            dry_run: matches!(
-                env_var("IOTHUB_DRY_RUN").as_deref(),
-                Some("1" | "true" | "TRUE" | "yes" | "on")
-            ),
+            dry_run: env_flag("IOTHUB_DRY_RUN"),
         })))
     }
 
@@ -368,6 +409,64 @@ impl IothubClient {
             )
             .await?;
         Ok(resp.json::<DeviceInfo>().await?.status)
+    }
+
+    /// 分页拉取项目下设备列表(复用 `request` 的 3 次重试退避)。
+    /// `product_id`:Some 时只查该产品,None 查项目全部。
+    ///
+    /// 用 `POST /search/query-devices` 的类 SQL 检索而非 `GET /devices?limit&offset`:
+    /// 签名器假设规范 URI 无 query string(路径末尾无条件补 `/`),改签名会牵动
+    /// KAT 锁死的 `sign_derived`;SQL 检索参数全在 body 里,完全绕开。
+    /// 代价:offset 上限 500、单页 50,超过约 550 台会报错(本项目远达不到)。
+    async fn list_devices(
+        &self,
+        product_id: Option<&str>,
+    ) -> anyhow::Result<Vec<DeviceListItem>> {
+        // product_id 仅允许字母/数字/下划线/连接符且 ≤36 字符(华为云字段规范),
+        // 校验后拼进类 SQL,拒绝一切注入式字符
+        let where_clause = match product_id {
+            Some(pid) if !pid.is_empty() => {
+                let valid = pid.len() <= 36
+                    && pid
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+                if !valid {
+                    anyhow::bail!(
+                        "IOTDA_SYNC_PRODUCT_ID 非法:仅允许字母/数字/下划线/连接符,≤36 字符"
+                    );
+                }
+                format!(" where product_id = '{pid}'")
+            }
+            _ => String::new(),
+        };
+        let mut all = Vec::new();
+        let mut offset: u32 = 0;
+        loop {
+            let sql = format!(
+                "select * from device{where_clause} limit {offset},{SEARCH_PAGE_ROWS}"
+            );
+            let resp = self
+                .request(
+                    reqwest::Method::POST,
+                    "/search/query-devices",
+                    Some(serde_json::json!({ "sql": sql })),
+                )
+                .await?;
+            let page: SearchDevicesResponse = resp.json().await?;
+            let page_len = page.devices.len();
+            all.extend(page.devices);
+            offset += SEARCH_PAGE_ROWS;
+            // count = 满足条件的总条数;offset 取尽或本页不足一页即收尾
+            if offset >= page.count as u32 || page_len < SEARCH_PAGE_ROWS as usize {
+                break;
+            }
+            if offset > MAX_SQL_OFFSET {
+                anyhow::bail!(
+                    "设备数超过 SQL 检索上限(offset 最大 {MAX_SQL_OFFSET}),请改用其他列表方式"
+                );
+            }
+        }
+        Ok(all)
     }
 
     /// 下发 `Light_Control_Led` 命令
@@ -523,17 +622,37 @@ async fn mark_stale_devices_offline(db: &sqlx::PgPool) -> Vec<String> {
 /// 轮询任务:周期性并发拉取各设备影子/状态入库
 pub async fn run(state: AppState, iothub: Arc<IothubClient>) {
     // 轮询间隔可用 IOTDA_POLL_INTERVAL_SECS 覆盖,未设置/非法/为 0 时默认 8 秒
-    let interval_secs = std::env::var("IOTDA_POLL_INTERVAL_SECS")
-        .ok()
-        .and_then(|v| v.parse::<u64>().ok())
-        .filter(|&s| s > 0)
-        .unwrap_or(8);
+    let interval_secs = env_u64_secs("IOTDA_POLL_INTERVAL_SECS", 8);
     tracing::info!("iothub poll interval: {interval_secs}s");
     let mut ticker = tokio::time::interval(Duration::from_secs(interval_secs));
     // 单轮轮询超时(如设备多/网络慢)时顺延而不是补打,避免请求叠加
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+    // 设备自动同步(可选):把华为云新增设备自动注册进本地 device 表 + 通知提醒。
+    // 间隔与轮询 tick 解耦(默认 30 分钟),启动即先跑一次,兼作配置自检。
+    let auto_sync = env_flag("IOTDA_AUTO_SYNC_DEVICES");
+    let sync_interval = Duration::from_secs(env_u64_secs(
+        "IOTDA_SYNC_INTERVAL_SECS",
+        DEFAULT_SYNC_INTERVAL_SECS,
+    ));
+    let sync_product = std::env::var("IOTDA_SYNC_PRODUCT_ID")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
+    if auto_sync {
+        tracing::info!(
+            "device auto-sync enabled (interval: {sync_interval:?}, product filter: {sync_product:?})"
+        );
+    }
+    let mut last_sync: Option<tokio::time::Instant> = None;
     loop {
         ticker.tick().await;
+
+        // 首次 tick 立即同步(自检),之后按固定间隔;失败只记日志,不影响轮询
+        if auto_sync && last_sync.is_none_or(|t| t.elapsed() >= sync_interval) {
+            last_sync = Some(tokio::time::Instant::now());
+            sync_devices(&state, &iothub, sync_product.as_deref()).await;
+        }
 
         mark_stale_devices_offline(&state.db).await;
 
@@ -677,6 +796,110 @@ pub async fn apply_shadow_props(
     Ok(())
 }
 
+/// 设备自动同步的结果视图(仅本模块内部使用)
+#[derive(Default)]
+struct SyncReport {
+    /// 本次新入库的设备(云端有、本地无)
+    pub added: Vec<String>,
+    /// 本地有、云端无的设备(可能在云端被删或注册 ID 有误)
+    pub missing_in_cloud: Vec<String>,
+}
+
+/// 华为云设备列表 → 本地 `device` 表(只增、不删、不改):
+/// - 云端有、本地没有 → 插入,name 取云端 device_name(缺省用 device_id)
+/// - 已存在 → 不动(手工注册的 name/location/经纬度不被覆盖)
+/// - 本地有、云端没有 → 只收集进 `missing_in_cloud` 供提醒,不删除
+///
+/// 幂等:先拉全量再写库;任何一轮失败/重复执行都不会产生重复行或覆盖资料。
+async fn sync_devices_from_cloud(
+    db: &sqlx::PgPool,
+    iothub: &IothubClient,
+    product_id: Option<&str>,
+) -> anyhow::Result<SyncReport> {
+    let cloud = iothub.list_devices(product_id).await?;
+    let mut report = SyncReport::default();
+    for item in &cloud {
+        let name = item
+            .device_name
+            .as_deref()
+            .filter(|n| !n.is_empty())
+            .unwrap_or(&item.device_id);
+        let inserted = sqlx::query(
+            "INSERT INTO device (id, name) VALUES ($1, $2) \
+             ON CONFLICT (id) DO NOTHING",
+        )
+        .bind(&item.device_id)
+        .bind(name)
+        .execute(db)
+        .await?;
+        if inserted.rows_affected() > 0 {
+            report.added.push(item.device_id.clone());
+        }
+    }
+    let cloud_ids: HashSet<&str> =
+        cloud.iter().map(|d| d.device_id.as_str()).collect();
+    let local: Vec<(String,)> =
+        sqlx::query_as("SELECT id FROM device").fetch_all(db).await?;
+    report.missing_in_cloud = local
+        .into_iter()
+        .map(|(id,)| id)
+        .filter(|id| !cloud_ids.contains(id.as_str()))
+        .collect();
+    Ok(report)
+}
+
+/// 一次自动同步的执行体:同步入库 + 新增/漂移通知。
+/// 通知去重靠 `notify::insert_sync_notification` 的"同设备同标题未读已存在则跳过",
+/// 漂移设备每轮都会命中,但提醒只保留到管理员读掉为止,不会 30 分钟刷一条。
+async fn sync_devices(
+    state: &AppState,
+    iothub: &IothubClient,
+    product_id: Option<&str>,
+) {
+    if iothub.dry_run {
+        tracing::debug!("dry-run: skip device auto-sync");
+        return;
+    }
+    let report = match sync_devices_from_cloud(&state.db, iothub, product_id).await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            tracing::error!("device auto-sync failed: {e:#}");
+            return;
+        }
+    };
+    for id in &report.added {
+        tracing::info!("device auto-sync: 新设备 {id} 已自动入库");
+        if let Err(e) = notify::insert_sync_notification(
+            &state.db,
+            "华为云新增设备已自动注册",
+            &format!(
+                "设备 {id} 在华为云已存在而本地未注册,已自动入库;如需补充位置与坐标请编辑设备资料。"
+            ),
+            Some(id),
+        )
+        .await
+        {
+            tracing::error!("sync notification for {id} failed: {e}");
+        }
+    }
+    for id in &report.missing_in_cloud {
+        tracing::warn!("device auto-sync: 本地设备 {id} 在华为云未找到");
+        if let Err(e) = notify::insert_sync_notification(
+            &state.db,
+            "本地设备在华为云未找到",
+            &format!(
+                "本地已注册设备 {id} 未出现在华为云设备列表中,可能已在云端删除或注册 ID 有误,请检查。"
+            ),
+            Some(id),
+        )
+        .await
+        {
+            tracing::error!("sync notification for {id} failed: {e}");
+        }
+    }
+}
+
 async fn poll_device(
     state: &AppState,
     iothub: &IothubClient,
@@ -757,5 +980,38 @@ mod tests {
             .find(|s| s.service_id == "Light")
             .unwrap();
         assert!(svc.reported.event_time.is_none());
+    }
+
+    /// 灵活搜索响应:devices + count 正常解析,device_name 可缺省
+    #[test]
+    fn search_devices_response_parses() {
+        let json = serde_json::json!({
+            "devices": [
+                {"device_id": "d1", "device_name": "路灯1"},
+                {"device_id": "d2"}
+            ],
+            "count": 2
+        });
+        let resp: SearchDevicesResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(resp.devices.len(), 2);
+        assert_eq!(resp.devices[0].device_name.as_deref(), Some("路灯1"));
+        assert_eq!(resp.devices[1].device_name.as_deref(), None);
+        assert_eq!(resp.count, 2);
+    }
+
+    /// 灵活搜索响应:count 与整个 devices 数组缺省时也能解析(按 0/空处理)
+    #[test]
+    fn search_devices_response_defaults() {
+        let json = serde_json::json!({
+            "devices": [{"device_id": "d1"}]
+        });
+        let resp: SearchDevicesResponse = serde_json::from_value(json).unwrap();
+        assert_eq!(resp.devices.len(), 1);
+        assert_eq!(resp.count, 0);
+
+        let json = serde_json::json!({});
+        let resp: SearchDevicesResponse = serde_json::from_value(json).unwrap();
+        assert!(resp.devices.is_empty());
+        assert_eq!(resp.count, 0);
     }
 }
