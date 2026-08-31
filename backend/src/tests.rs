@@ -833,3 +833,49 @@ async fn internal_error_body_leaks_nothing() {
         .unwrap();
     assert_eq!(std::str::from_utf8(&body).unwrap(), "bad input");
 }
+
+// ---------------- 调光曲线校验 ----------------
+
+#[test]
+fn dim_curve_valid_cases() {
+    // 空串 = 不启用曲线,合法
+    assert!(api::validate_dim_curve("").is_ok());
+    assert!(api::validate_dim_curve("0:100,300:0").is_ok());
+    // 单锚点
+    assert!(api::validate_dim_curve("150:60").is_ok());
+    // 4 点上限、lux/pct 边界值(含端点)
+    assert!(api::validate_dim_curve("0:100,150:60,300:0,100000:0").is_ok());
+}
+
+#[test]
+fn dim_curve_invalid_cases() {
+    use api::validate_dim_curve as v;
+    // 超过 4 点
+    assert!(matches!(
+        v("0:0,10:0,20:0,30:0,40:0").unwrap_err(),
+        Error::BadRequest(_)
+    ));
+    // lux 非严格递增(回退与相等都拒收),报错指明点位序号
+    let e = v("300:50,100:80").unwrap_err();
+    assert!(matches!(e, Error::BadRequest(_)));
+    assert_eq!(e.to_string(), "DimCurve 第 2 点 lux 必须严格大于前一点");
+    assert!(matches!(
+        v("100:50,100:80").unwrap_err(),
+        Error::BadRequest(_)
+    ));
+    // pct 越界
+    assert!(matches!(v("0:101").unwrap_err(), Error::BadRequest(_)));
+    assert!(matches!(v("0:-1").unwrap_err(), Error::BadRequest(_)));
+    // lux 越界
+    assert!(matches!(v("100001:50").unwrap_err(), Error::BadRequest(_)));
+    // 缺冒号 / 非数字
+    assert!(matches!(v("abc").unwrap_err(), Error::BadRequest(_)));
+    assert!(matches!(v("10:abc").unwrap_err(), Error::BadRequest(_)));
+    // 总长 > 64
+    let long = format!("0:100,{}:60", "1".repeat(60));
+    assert!(long.len() > 64);
+    assert!(matches!(
+        v(&long).unwrap_err(),
+        Error::BadRequest(_)
+    ));
+}

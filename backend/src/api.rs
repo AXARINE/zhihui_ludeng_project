@@ -366,6 +366,70 @@ pub struct ThresholdBody {
     pub threshold: i32,
 }
 
+#[derive(Serialize, ToSchema)]
+pub struct DimmingResponse {
+    pub device_id: String,
+    pub brightness: i32,
+    pub dim_curve: String,
+}
+
+#[derive(Deserialize, ToSchema)]
+pub struct DimmingBody {
+    pub brightness: Option<i32>,
+    pub dim_curve: Option<String>,
+}
+
+/// 校验 `DimCurve` 曲线串:空串合法(不启用);非空为 ≤4 个 `lux:pct` 锚点,
+/// lux 严格递增且 0~100000,pct 0~100,总长 ≤64
+pub fn validate_dim_curve(s: &str) -> Result<(), Error> {
+    if s.is_empty() {
+        return Ok(());
+    }
+    if s.len() > 64 {
+        return Err(Error::BadRequest("DimCurve 总长不能超过 64 字符".into()));
+    }
+    let points: Vec<&str> = s.split(',').collect();
+    if points.len() > 4 {
+        return Err(Error::BadRequest("DimCurve 最多 4 个锚点".into()));
+    }
+    let mut prev_lux: Option<i32> = None;
+    for (i, point) in points.iter().enumerate() {
+        let segs: Vec<&str> = point.split(':').collect();
+        if segs.len() != 2 {
+            return Err(Error::BadRequest(format!(
+                "DimCurve 第 {} 点格式错误,需为 lux:pct",
+                i + 1
+            )));
+        }
+        let lux: i32 = segs[0].parse().map_err(|_| {
+            Error::BadRequest(format!("DimCurve 第 {} 点 lux 非数字", i + 1))
+        })?;
+        let pct: i32 = segs[1].parse().map_err(|_| {
+            Error::BadRequest(format!("DimCurve 第 {} 点 pct 非数字", i + 1))
+        })?;
+        if !(0..=100_000).contains(&lux) {
+            return Err(Error::BadRequest(format!(
+                "DimCurve 第 {} 点 lux 需在 0~100000 之间",
+                i + 1
+            )));
+        }
+        if !(0..=100).contains(&pct) {
+            return Err(Error::BadRequest(format!(
+                "DimCurve 第 {} 点 pct 需在 0~100 之间",
+                i + 1
+            )));
+        }
+        if prev_lux.is_some_and(|prev| lux <= prev) {
+            return Err(Error::BadRequest(format!(
+                "DimCurve 第 {} 点 lux 必须严格大于前一点",
+                i + 1
+            )));
+        }
+        prev_lux = Some(lux);
+    }
+    Ok(())
+}
+
 #[derive(Deserialize, ToSchema)]
 pub struct AlarmPatch {
     pub resolved: bool,
@@ -473,6 +537,10 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/devices/{id}/threshold",
             get(get_threshold).put(put_threshold),
+        )
+        .route(
+            "/api/devices/{id}/dimming",
+            get(get_dimming).put(put_dimming),
         )
         .route("/api/alarms", get(list_alarms))
         .route("/api/alarms/{id}", patch(patch_alarm))
@@ -1011,6 +1079,114 @@ async fn put_threshold(
         "config.threshold",
         &id,
         &format!("threshold={}", body.threshold),
+    )
+    .await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+// ---------------- 调光配置 ----------------
+#[utoipa::path(
+    get,
+    path = "/api/devices/{id}/dimming",
+    params(("id" = String, Path, description = "设备 ID")),
+    responses((status = 200, description = "当前调光配置(未配置默认亮度 100、无曲线)", body = DimmingResponse)),
+    security(("bearer_auth" = []))
+)]
+async fn get_dimming(
+    State(s): State<AppState>,
+    auth: Auth,
+    Path(id): Path<String>,
+) -> Result<Json<DimmingResponse>, Error> {
+    auth.require(&s, "config:dimming").await?;
+    let row = sqlx::query_as::<_, (i32, String)>(
+        "SELECT brightness, dim_curve FROM config WHERE device_id = $1",
+    )
+    .bind(&id)
+    .fetch_optional(&s.db)
+    .await?;
+    let (brightness, dim_curve) = row.unwrap_or((100, String::new()));
+    Ok(Json(DimmingResponse {
+        device_id: id,
+        brightness,
+        dim_curve,
+    }))
+}
+
+#[utoipa::path(
+    put,
+    path = "/api/devices/{id}/dimming",
+    params(("id" = String, Path, description = "设备 ID")),
+    request_body = DimmingBody,
+    responses(
+        (status = 204, description = "调光配置已入库并下发 IoTDA"),
+        (status = 400, description = "参数错误"),
+        (status = 403, description = "无权限"),
+        (status = 502, description = "IoTDA 调用失败"),
+        (status = 503, description = "IoTDA 未配置")
+    ),
+    security(("bearer_auth" = []))
+)]
+async fn put_dimming(
+    State(s): State<AppState>,
+    auth: Auth,
+    Path(id): Path<String>,
+    Json(body): Json<DimmingBody>,
+) -> Result<StatusCode, Error> {
+    auth.require(&s, "config:dimming").await?;
+    if body.brightness.is_none() && body.dim_curve.is_none() {
+        return Err(Error::BadRequest(
+            "brightness/dim_curve 至少提供一个".into(),
+        ));
+    }
+    if body.brightness.is_some_and(|b| !(0..=100).contains(&b)) {
+        return Err(Error::BadRequest("brightness 需在 0~100 之间".into()));
+    }
+    if let Some(c) = body.dim_curve.as_deref() {
+        validate_dim_curve(c)?;
+    }
+    // 只更新出现的列:INSERT 时未提供的列取 DEFAULT,冲突时保持原值
+    let mut qb = sqlx::QueryBuilder::new("INSERT INTO config (device_id");
+    if body.brightness.is_some() {
+        qb.push(", brightness");
+    }
+    if body.dim_curve.is_some() {
+        qb.push(", dim_curve");
+    }
+    qb.push(") VALUES (").push_bind(&id);
+    if let Some(b) = body.brightness {
+        qb.push(", ").push_bind(b);
+    }
+    if let Some(c) = body.dim_curve.as_deref() {
+        qb.push(", ").push_bind(c);
+    }
+    qb.push(") ON CONFLICT (device_id) DO UPDATE SET ");
+    {
+        let mut sep = qb.separated(", ");
+        if let Some(b) = body.brightness {
+            sep.push("brightness = ").push_bind_unseparated(b);
+        }
+        if let Some(c) = body.dim_curve.as_deref() {
+            sep.push("dim_curve = ").push_bind_unseparated(c);
+        }
+    }
+    qb.build().execute(&s.db).await?;
+    // 先落库再推:推送失败由 ? 冒泡成 502(与 put_threshold 一致)
+    let hub = s.iothub.as_ref().ok_or(Error::IothubUnavailable)?;
+    hub.set_dimming(&id, body.brightness, body.dim_curve.as_deref())
+        .await?;
+    let mut detail = Vec::new();
+    if let Some(b) = body.brightness {
+        detail.push(format!("brightness={b}"));
+    }
+    if let Some(c) = body.dim_curve.as_deref() {
+        detail.push(format!("dim_curve={c}"));
+    }
+    audit(
+        &s.db,
+        Some(auth.user_id),
+        "config.dimming",
+        &id,
+        &detail.join(" "),
     )
     .await;
     Ok(StatusCode::NO_CONTENT)

@@ -522,6 +522,41 @@ impl IothubClient {
         .await?;
         Ok(())
     }
+
+    /// 设置调光可写属性(Brightness 手动亮度 / `DimCurve` 照度曲线,只放下出现的键)
+    pub async fn set_dimming(
+        &self,
+        device_id: &str,
+        brightness: Option<i32>,
+        dim_curve: Option<&str>,
+    ) -> anyhow::Result<()> {
+        if self.dry_run {
+            tracing::debug!(
+                "dry-run: set_dimming({device_id}, {brightness:?}, {dim_curve:?}) stubbed"
+            );
+            return Ok(());
+        }
+        let mut properties = serde_json::Map::new();
+        if let Some(b) = brightness {
+            properties.insert("Brightness".to_string(), b.into());
+        }
+        if let Some(c) = dim_curve {
+            properties.insert("DimCurve".to_string(), c.into());
+        }
+        let body = serde_json::json!({
+            "services": [{
+                "service_id": "Light",
+                "properties": serde_json::Value::Object(properties)
+            }]
+        });
+        self.request(
+            reqwest::Method::PUT,
+            &format!("/devices/{device_id}/properties"),
+            Some(body),
+        )
+        .await?;
+        Ok(())
+    }
 }
 
 /// 按华为云 V11-HMAC-SHA256 衍生签名算法生成 Authorization 头(纯函数)

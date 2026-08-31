@@ -25,6 +25,8 @@ use utoipa::OpenApi;
         api::set_lamp,
         api::get_threshold,
         api::put_threshold,
+        api::get_dimming,
+        api::put_dimming,
         api::list_device_commands,
         api::list_global_commands,
         api::list_alarms,
