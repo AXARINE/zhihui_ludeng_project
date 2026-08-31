@@ -1,7 +1,7 @@
 # 智慧路灯 — 华为云 IoTDA 部署文档
 
 > 本文档描述如何把智慧路灯系统部署起来:① 华为云 IoTDA 侧建实例/产品/设备/凭证,② 固件编译烧录到 BearPi-HM Nano 开发板,③ Rust 后端 + PostgreSQL 部署到本地(WSL)或云服务器,④ 全链路验收。
-> 系统已全链路验收,本文档按当前代码事实编写;接口清单见 `README.md` 第 3 节,功能愿景见 `智慧路灯_基本功能清单.md`。
+> 系统已全链路验收,本文档按当前代码事实编写;接口清单见 `backend/README.md` §5(接口总览在 §5.2),功能愿景见 `智慧路灯_基本功能清单.md`。
 
 ## 1. 部署架构
 
@@ -15,9 +15,9 @@ Rust 后端(axum, 8080) --> PostgreSQL(Docker)
 |---|---|---|
 | 设备固件 | BearPi-HM Nano 开发板 | 50ms 采样 + 本地光照联动(断网可用),每 5s 上报 `Luminance`/`LightStatus`,接收命令与阈值下发 |
 | IoTDA | 华为云 | 设备接入(MQTT)+ 影子 + 在线状态 + 命令/属性转发 |
-| Rust 后端 | 本地 WSL 或云服务器 | 每 8s 轮询影子入库、在线/离线监控、REST API(含账号/RBAC)、命令经北向 API 转发 |
+| Rust 后端 | 本地 WSL 或云服务器 | 轮询(默认 8s,可配 `IOTDA_POLL_INTERVAL_SECS`)影子入库、在线/离线监控、REST API(含账号/RBAC)、命令经北向 API 转发 |
 | PostgreSQL | Docker 容器 | 光照历史、设备、告警、指令、账号等数据,迁移脚本随后端启动自动执行 |
-| 前端 | 不在本仓库 | 通过后端 REST API 访问(接口文档见 Swagger UI `/docs`) |
+| 前端 | `frontend_vue/`(Vue3 + Vite + Element Plus + ECharts) | 构建产物可由 §5.4 的 Caddy 一并托管,经后端 REST API 访问 |
 
 ## 2. 前置条件
 
@@ -135,7 +135,19 @@ vim .env
 | `DATABASE_URL` | ✅ | 本地直连模式用 `127.0.0.1`(compose 会覆盖为内部服务名) |
 | `JWT_SECRET` | ✅ | 生产必改:`openssl rand -hex 32` |
 | `IOTDA_WEBHOOK_TOKEN` | 公网必填 | 数据转发推送回调的共享 token;配置后回调要求 `Authorization: Bearer`(见 3.5),留空不鉴权(仅本地开发) |
-| `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD` | 建议 | 首次启动且账号表为空时创建管理员;默认 `admin/admin123` 仅开发用 |
+| `BOOTSTRAP_SUPER_ADMIN_USERNAME` / `BOOTSTRAP_SUPER_ADMIN_PASSWORD` | 建议 | 引导**系统管理员**;默认 `superadmin/superadmin123` 仅开发用(删除前须先建新 super_admin,见 5.5 守卫) |
+| `BOOTSTRAP_ADMIN_USERNAME` / `BOOTSTRAP_ADMIN_PASSWORD` | 建议 | 引导**路灯管理员**;默认 `admin/admin123` 仅开发用 |
+| `ALLOWED_ORIGINS` | 可选 | CORS 白名单(逗号分隔);留空=开发模式全放开(见 5.5) |
+| `IOTDA_POLL_INTERVAL_SECS` | 可选 | 影子轮询间隔秒数,默认 8;启用数据转发推送后建议 60(见 3.5) |
+| `IOTDA_AUTO_SYNC_DEVICES` | 可选 | `false` 默认;`true` 时自动把华为云设备列表同步注册入库(见 5.6) |
+| `IOTDA_SYNC_INTERVAL_SECS` | 可选 | 设备自动同步间隔秒数,默认 1800 |
+| `IOTDA_SYNC_PRODUCT_ID` | 可选 | 只同步该产品下的设备;留空=项目全部 |
+| `DATABASE_POOL_SIZE` | 可选 | 连接池上限,默认 20 |
+| `ARGON2_MAX_CONCURRENCY` | 可选 | Argon2 校验并发闸,默认 32 |
+| `LOGIN_RATE_LIMIT_PER_MIN` | 可选 | 登录限流:每 IP 每分钟次数,默认 30 |
+| `IOTHUB_DRY_RUN` | 可选 | `true` 时北向调用本地短路(不发真实华为云请求,压测用);生产保持 `false` |
+
+> 完整变量清单与注释见 `backend/.env.example`(凭据入库/进镜像均被排除)。
 
 ### 5.2 本地开发模式(WSL)
 
@@ -177,17 +189,41 @@ docker logs -f streetlight-backend
 
 看到 `database migrated` 与 `http listening on 0.0.0.0:8080` 即成功;首次启动自动建表并创建引导管理员。
 
-### 5.4 HTTPS 反向代理(推荐 Caddy)
+### 5.4 HTTPS 反向代理(推荐 Caddy,前端静态托管 + 后端反代一步到位)
+
+先构建前端产物:
+
+```bash
+cd frontend_vue
+npm install && npm run build          # 产物在 frontend_vue/dist/
+sudo mkdir -p /srv/streetlight && sudo cp -r dist/* /srv/streetlight/
+```
+
+再装 Caddy:
 
 ```bash
 sudo apt install -y caddy
 ```
 
-`/etc/caddy/Caddyfile`:
+`/etc/caddy/Caddyfile`(同域名下,前端 SPA 走静态托管,`/api` 与 `/docs` 反代到后端 8080):
 
 ```
 streetlight.example.com {
-    reverse_proxy 127.0.0.1:8080
+    root * /srv/streetlight
+
+    # 后端 API + Swagger
+    handle /api/* {
+        reverse_proxy 127.0.0.1:8080
+    }
+    handle /docs* {
+        reverse_proxy 127.0.0.1:8080
+    }
+
+    # 前端 SPA:history 路由回退到 index.html
+    handle {
+        try_files {path} /index.html
+        file_server
+    }
 }
 ```
 
@@ -195,19 +231,23 @@ streetlight.example.com {
 sudo systemctl reload caddy
 ```
 
-之后访问 `https://streetlight.example.com/docs`;云服务器安全组只放行 443。
+之后访问 `https://streetlight.example.com`(前端)、`https://streetlight.example.com/docs`(Swagger);云服务器安全组只放行 443。前端与后端同域时无需处理 CORS;若前端部署在**另一域名**,见 5.5 用 `ALLOWED_ORIGINS` 收紧。
 
 ### 5.5 上线加固
 
 - `JWT_SECRET` 必须替换为随机值;
-- `BOOTSTRAP_ADMIN_PASSWORD` 首次启动前设成强密码;上线后建议用 API 创建正式账号并删除默认 admin;
+- **两个引导账号**首次启动前都设成强密码:`BOOTSTRAP_SUPER_ADMIN_USERNAME/PASSWORD` 与 `BOOTSTRAP_ADMIN_USERNAME/PASSWORD`(默认 `superadmin/superadmin123`、`admin/admin123` 仅开发用);上线后用 API 创建正式账号并删除默认引导账号。
+  - ⚠️ **守卫**:代码禁止禁用/删除/降级**最后一个启用的 super_admin**(防锁死),因此删除默认 superadmin 前须先创建一个新的 super_admin 账号;
 - 启用数据转发推送时 `IOTDA_WEBHOOK_TOKEN` 必须配置并与 IoTDA 转发规则的自定义 Header 一致(见 3.5),否则回调接口无鉴权;
-- 前端与后端不同域名时,把 `backend/src/main.rs` 的 CORS `allow_origin(Any)` 改为前端域名(同域走 Caddy 则无需处理);
+- 前端与后端**不同域名**时,在 `.env` 设 `ALLOWED_ORIGINS=<前端域名>`(逗号分隔)收紧 CORS;同域由 Caddy 统一托管(见 5.4)则无需处理;
 - 安全组只放行 80/443,**不放行 5432/8080**。
 
 ### 5.6 注册设备(启动后第一步)
 
-后端只轮询已注册的设备:调 `POST /api/devices`(可带 `name`、`location`;ID 与固件 `CONFIG_APP_DEVICEID` 一致)后,该设备才会被纳入影子轮询、在线监控与告警。
+后端只轮询已注册的设备,有两种方式:
+
+- **自动同步(推荐)**:在 `.env` 设 `IOTDA_AUTO_SYNC_DEVICES=true`,后端按 `IOTDA_SYNC_INTERVAL_SECS`(默认 1800s)把华为云设备列表自动同步进 `device` 表并入库——只增不删,手工注册的 name/location/经纬度不被覆盖;可用 `IOTDA_SYNC_PRODUCT_ID` 限定只同步某产品。改完重启后端即可生效。
+- **手动注册**:调 `POST /api/devices`(可带 `name`、`location`;ID 与固件 `CONFIG_APP_DEVICEID` 一致)后,该设备才被纳入影子轮询、在线监控与告警。
 
 ## 6. 部署验收清单
 
@@ -224,6 +264,7 @@ sudo systemctl reload caddy
 | 权限隔离 | 市政账号(role_id:1)执行管理操作 | 返回 403 |
 
 > 注意:控灯/阈值是透传 IoTDA 北向的,设备离线时北向拒绝(返回 502 带原因);指令记录中 `sent` 仅表示北向已受理,不代表灯已动作。
+> 在线状态除 IoTDA 上报外,后端还有 **90s 本地失联检测**(以 IoTDA 平台事件时间为心跳,超过 90s 未前进即判定离线),因此设备实际掉电到"离线告警"产生可能有数秒到数十秒延迟,验收时预留观察窗口。
 
 ## 7. 日常运维
 
@@ -264,12 +305,13 @@ cd backend && docker compose up -d --build   # 新 migration 自动执行
 
 - **设备侧 1883 明文 MQTT**:不要启用 8883 MQTTS(Hi3861 iot_link/mbedtls TLS 稳定性问题,见 4.2);设备密钥文件由华为云下载,妥善保管。
 - **凭据不进 git**:Wi-Fi 密码、设备密钥、AK/SK 只存在于本地 `app_config.h` 与 `backend/.env`(均被 `.gitignore` 忽略);`.dockerignore` 排除 `.env`,凭据不进镜像。
-- **轮询延迟**:影子入库与状态回显存在 5~10s 延迟(后端每 8s 轮询),演示可接受;如需实时可后续升级数据流转(需公网可达的接收端)。
-- **北向限流**:轮询间隔固定 8s,勿过快调用,避免触发限流。
+- **轮询延迟**:影子入库与状态回显存在数秒延迟(后端默认每 8s 轮询,可配 `IOTDA_POLL_INTERVAL_SECS`;启用数据转发推送后延迟更低,见 3.5),演示可接受;如需实时可优先走数据流转(需公网可达的接收端)。
+- **北向限流**:轮询间隔默认 8s(启用数据转发推送后建议 60s),勿过快调用,避免触发华为云限流。
 - **计费**:标准版实例单设备演示在免费额度内;演示结束后及时删除不用的产品/设备。
 
 ## 9. 迭代流程(部署后的开发)
 
 - 固件:改 `C3_e53_sc1_pls/`(权威副本,勿直接改 submodule 树)→ `./build.sh` → `./flash.sh 4` → RESET ×2 → 串口验证;
-- 后端:改 `backend/src/` → `cargo build` → curl 验证 REST API;新接口必须补 `#[utoipa::path]` 注解并登记进 `openapi.rs`;
-- 数据库 schema:上线前可直接改 `migrations/0001_init.sql` 并清卷重建;**上线后必须新建递增迁移**。
+- 后端:改 `backend/src/` → `cargo build` → curl 验证 REST API;新接口必须补 `#[utoipa::path]` 注解并登记进 `openapi.rs`(含 `report.rs`/`notify.rs` 等新增模块);
+- 前端:改 `frontend_vue/src/` → `npm run build` → 把 `dist/` 部署到 `/srv/streetlight`(见 5.4);
+- 数据库 schema:上线前可直接改 `migrations/0001_init.sql` 并清卷重建;**上线后必须新建递增迁移**(当前已到 `0007_notifications.sql`,新增从 `0008_` 起编号)。
