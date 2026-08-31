@@ -205,6 +205,33 @@ pub async fn insert_report_notification(
     Ok(())
 }
 
+/// 供设备自动同步(`iothub::sync_devices`)写入提醒(收件人 = 路灯管理员)。
+///
+/// 去重:同设备同标题的**未读**提醒已存在时跳过——漂移设备每轮同步都会命中,
+/// 但提醒只保留到管理员读掉为止,不会按同步间隔重复刷屏。
+/// (`IS NOT DISTINCT FROM` 同时覆盖 device_id 为 NULL 的情况。)
+pub async fn insert_sync_notification(
+    db: &PgPool,
+    title: &str,
+    content: &str,
+    device_id: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO notification (title, content, type, device_id, receiver_role) \
+         SELECT $1, $2, 'alert', $3, 'admin' \
+         WHERE NOT EXISTS ( \
+             SELECT 1 FROM notification \
+             WHERE title = $1 AND is_read = FALSE \
+             AND device_id IS NOT DISTINCT FROM $3)",
+    )
+    .bind(title)
+    .bind(content)
+    .bind(device_id)
+    .execute(db)
+    .await?;
+    Ok(())
+}
+
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route(

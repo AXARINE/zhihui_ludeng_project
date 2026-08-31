@@ -343,7 +343,8 @@ curl -s 'http://127.0.0.1:8080/api/alarms?resolved=false' \
 
 - `id` 为必填，去空格后 1~64 字符，必须与 IoTDA 设备 ID 一致。
 - 重复注册（同 ID）不报错，返回 201（`ON CONFLICT DO NOTHING`，幂等）。
-- 只有注册进 `device` 表的设备才会被 8 秒轮询任务查询。
+- 只有注册进 `device` 表的设备才会被轮询任务查询、接收推送。
+- 开启 `IOTDA_AUTO_SYNC_DEVICES` 后,华为云新增设备会自动注册入库(只增不删不改,间隔默认 30 分钟),并给路灯管理员发通知;手动注册对已在库设备仍幂等无害。
 - 经纬度可选；只传其中一个返回 400，范围越界（纬度 ±90、经度 ±180）返回 400。
 
 **PATCH /api/devices/{id}**：`name`、`location`、`latitude+longitude`（成对）至少提供一项，动态 SQL 只更新传入字段。
@@ -734,6 +735,9 @@ cargo build
 | `BOOTSTRAP_ADMIN_PASSWORD` | `admin123` | 仅当 `admin` 角色无账号时生效，生产必改 |
 | `IOTDA_POLL_INTERVAL_SECS` | `8` | 影子轮询间隔秒数；启用数据转发推送后建议 60（推送为主、轮询兜底校准） |
 | `IOTDA_WEBHOOK_TOKEN` | 空 | 数据转发回调共享 token；配置后 `/api/iotda/callback` 要求 `Authorization: Bearer`（常数时间比较），留空=不鉴权（仅本地开发，启动有 warn，公网必须配置） |
+| `IOTDA_AUTO_SYNC_DEVICES` | `false` | 设备自动同步开关：true 时按 `IOTDA_SYNC_INTERVAL_SECS` 把华为云设备列表同步进本地 `device` 表（只增不删不改，新设备自动注册），新增/漂移设备给路灯管理员发通知（未读去重） |
+| `IOTDA_SYNC_INTERVAL_SECS` | `1800` | 设备同步间隔秒数（默认 30 分钟；与轮询间隔解耦） |
+| `IOTDA_SYNC_PRODUCT_ID` | 空 | 只同步该产品下的设备；留空=项目全部（项目只有路灯一种产品时可不填） |
 | `ALLOWED_ORIGINS` | 空 | CORS 白名单（逗号分隔）；留空=开发模式全放开（`Any`） |
 | `RUST_LOG` | `info` | tracing env-filter |
 
