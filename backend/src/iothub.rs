@@ -152,14 +152,14 @@ struct DeviceInfo {
     status: OnlineStatus,
 }
 
-/// 查询设备列表(`POST /search/query-devices`)的响应视图:
-/// 用 marker 翻页(不请求 count),最后一页 marker 缺省
+/// 灵活搜索设备列表(`POST /search/query-devices`)的响应视图:
+/// `devices` = 本页条目,`count` = 满足条件的总条数(华为云 SDK `SearchDevicesResponse`)
 #[derive(serde::Deserialize)]
-struct DeviceListResponse {
+struct SearchDevicesResponse {
     #[serde(default)]
     devices: Vec<DeviceListItem>,
     #[serde(default)]
-    page: PageInfo,
+    count: i64,
 }
 
 #[derive(serde::Deserialize)]
@@ -169,15 +169,10 @@ struct DeviceListItem {
     device_name: Option<String>,
 }
 
-#[derive(serde::Deserialize, Default)]
-struct PageInfo {
-    #[serde(default)]
-    marker: Option<String>,
-}
-
-/// 设备列表翻页上限(50 台/页 × 200 页 = 10000 台):
-/// marker 异常重复时防止死循环,远超本项目规模
-const MAX_LIST_PAGES: usize = 200;
+/// SQL 检索单页行数(华为云 API 上限 50)
+const SEARCH_PAGE_ROWS: u32 = 50;
+/// SQL 检索 offset 硬上限(华为云 API 限制 500)
+const MAX_SQL_OFFSET: u32 = 500;
 
 /// 设备自动同步默认间隔:30 分钟
 const DEFAULT_SYNC_INTERVAL_SECS: u64 = 1800;
@@ -416,44 +411,58 @@ impl IothubClient {
         Ok(resp.json::<DeviceInfo>().await?.status)
     }
 
-    /// 分页拉取项目下设备列表(每次 50 台,marker 翻页;复用 `request` 的
-    /// 3 次重试退避)。`product_id`:Some 时只查该产品,None 查项目全部。
+    /// 分页拉取项目下设备列表(复用 `request` 的 3 次重试退避)。
+    /// `product_id`:Some 时只查该产品,None 查项目全部。
     ///
-    /// 用 body 分页的 `POST /search/query-devices` 而非 `GET /devices?limit&offset`:
+    /// 用 `POST /search/query-devices` 的类 SQL 检索而非 `GET /devices?limit&offset`:
     /// 签名器假设规范 URI 无 query string(路径末尾无条件补 `/`),改签名会牵动
-    /// KAT 锁死的 `sign_derived`,body 分页则完全绕开。
+    /// KAT 锁死的 `sign_derived`;SQL 检索参数全在 body 里,完全绕开。
+    /// 代价:offset 上限 500、单页 50,超过约 550 台会报错(本项目远达不到)。
     async fn list_devices(
         &self,
         product_id: Option<&str>,
     ) -> anyhow::Result<Vec<DeviceListItem>> {
+        // product_id 仅允许字母/数字/下划线/连接符且 ≤36 字符(华为云字段规范),
+        // 校验后拼进类 SQL,拒绝一切注入式字符
+        let where_clause = match product_id {
+            Some(pid) if !pid.is_empty() => {
+                let valid = pid.len() <= 36
+                    && pid
+                        .bytes()
+                        .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+                if !valid {
+                    anyhow::bail!(
+                        "IOTDA_SYNC_PRODUCT_ID 非法:仅允许字母/数字/下划线/连接符,≤36 字符"
+                    );
+                }
+                format!(" where product_id = '{pid}'")
+            }
+            _ => String::new(),
+        };
         let mut all = Vec::new();
-        let mut marker: Option<String> = None;
-        for page_no in 0..MAX_LIST_PAGES {
-            let mut body = serde_json::json!({
-                "page": { "limit": 50, "count": false }
-            });
-            if let Some(m) = &marker {
-                body["page"]["marker"] = serde_json::json!(m);
-            }
-            if let Some(pid) = product_id {
-                body["product_id"] = serde_json::json!(pid);
-            }
+        let mut offset: u32 = 0;
+        loop {
+            let sql = format!(
+                "select * from device{where_clause} limit {offset},{SEARCH_PAGE_ROWS}"
+            );
             let resp = self
                 .request(
                     reqwest::Method::POST,
                     "/search/query-devices",
-                    Some(body),
+                    Some(serde_json::json!({ "sql": sql })),
                 )
                 .await?;
-            let page: DeviceListResponse = resp.json().await?;
+            let page: SearchDevicesResponse = resp.json().await?;
+            let page_len = page.devices.len();
             all.extend(page.devices);
-            marker = page.page.marker;
-            if marker.is_none() {
+            offset += SEARCH_PAGE_ROWS;
+            // count = 满足条件的总条数;offset 取尽或本页不足一页即收尾
+            if offset >= page.count as u32 || page_len < SEARCH_PAGE_ROWS as usize {
                 break;
             }
-            if page_no + 1 == MAX_LIST_PAGES {
+            if offset > MAX_SQL_OFFSET {
                 anyhow::bail!(
-                    "设备列表超过 {MAX_LIST_PAGES} 页(上限 10000 台),疑似翻页异常"
+                    "设备数超过 SQL 检索上限(offset 最大 {MAX_SQL_OFFSET}),请改用其他列表方式"
                 );
             }
         }
@@ -973,38 +982,36 @@ mod tests {
         assert!(svc.reported.event_time.is_none());
     }
 
-    /// 设备列表翻页中:marker 有值、device_name 可缺省
+    /// 灵活搜索响应:devices + count 正常解析,device_name 可缺省
     #[test]
-    fn device_list_response_with_marker() {
+    fn search_devices_response_parses() {
         let json = serde_json::json!({
             "devices": [
                 {"device_id": "d1", "device_name": "路灯1"},
                 {"device_id": "d2"}
             ],
-            "page": {"marker": "next-page-token"}
+            "count": 2
         });
-        let resp: DeviceListResponse = serde_json::from_value(json).unwrap();
+        let resp: SearchDevicesResponse = serde_json::from_value(json).unwrap();
         assert_eq!(resp.devices.len(), 2);
         assert_eq!(resp.devices[0].device_name.as_deref(), Some("路灯1"));
         assert_eq!(resp.devices[1].device_name.as_deref(), None);
-        assert_eq!(resp.page.marker.as_deref(), Some("next-page-token"));
+        assert_eq!(resp.count, 2);
     }
 
-    /// 设备列表最后一页:page 缺 marker(甚至缺整个 page 字段)都按翻页结束处理
+    /// 灵活搜索响应:count 与整个 devices 数组缺省时也能解析(按 0/空处理)
     #[test]
-    fn device_list_response_last_page_without_marker() {
-        let json = serde_json::json!({
-            "devices": [{"device_id": "d1"}],
-            "page": {}
-        });
-        let resp: DeviceListResponse = serde_json::from_value(json).unwrap();
-        assert!(resp.page.marker.is_none());
-
+    fn search_devices_response_defaults() {
         let json = serde_json::json!({
             "devices": [{"device_id": "d1"}]
         });
-        let resp: DeviceListResponse = serde_json::from_value(json).unwrap();
+        let resp: SearchDevicesResponse = serde_json::from_value(json).unwrap();
         assert_eq!(resp.devices.len(), 1);
-        assert!(resp.page.marker.is_none());
+        assert_eq!(resp.count, 0);
+
+        let json = serde_json::json!({});
+        let resp: SearchDevicesResponse = serde_json::from_value(json).unwrap();
+        assert!(resp.devices.is_empty());
+        assert_eq!(resp.count, 0);
     }
 }
