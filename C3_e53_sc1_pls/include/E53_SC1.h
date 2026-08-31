@@ -19,19 +19,20 @@
 #define BH1750_Addr 0x23
 
 /***************************************************************
-* 名		称: GasStatus_ENUM
-* 说    明：枚举状态结构体
+* 名      称: LampStatus
+* 说    明：灯开关状态(仅本工程内部使用,C++ enum class)
 ***************************************************************/
-typedef enum
-{
-	OFF = 0,
-	ON
-} E53_SC1_Status_ENUM;
+enum class LampStatus {
+    Off = 0,
+    On
+};
 
 void E53_SC1_Init(void);
 float E53_SC1_Read_Data(void);
-void Light_StatusSet(E53_SC1_Status_ENUM status);
-
+void Light_StatusSet(LampStatus status);
+/* PWM 调光:percent 0~100(感知亮度),0 熄灭 / 1~99 硬件 PWM(10kHz,γ=2.2) / 100 常亮 */
+void Light_SetBrightness(int percent);
+/* 感知亮度 % → 实际占空比 %(γ=2.2 后,0~100);自照度折算等需要物理占空比的场合用 */
+int Light_DutyPercent(int percent);
 
 #endif /* __E53_SC1_H__ */
-

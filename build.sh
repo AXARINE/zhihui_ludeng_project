@@ -23,10 +23,14 @@ if [ -f "$SAMPLE_DST/include/app_config.h" ]; then
 fi
 rm -rf "$SAMPLE_DST"
 
-# 只同步本仓库 git 跟踪的文件:app_config.h 被 .gitignore 忽略,不会随同步进入源码树
-( cd "$REPO_ROOT" && git ls-files -z -- C3_e53_sc1_pls | tar --null -T - -cf - ) \
+# 同步本仓库 git 跟踪 + 未忽略的新文件(新写的 .cpp 可能还没 git add);
+# --exclude-standard 保证被 .gitignore 忽略的 app_config.h 不随同步进入源码树;
+# 逐条 [ -f ] 过滤:已删除但未 git rm 的跟踪文件会让 tar stat 失败
+( cd "$REPO_ROOT" && git ls-files -z --cached --others --exclude-standard -- C3_e53_sc1_pls \
+    | while IFS= read -r -d '' f; do [ -f "$f" ] && printf '%s\0' "$f"; done \
+    | tar --null -T - -cf - ) \
   | tar -xf - -C "$SAMPLE_DIR"
-[ -f "$SAMPLE_DST/e53_sc1_example.c" ] || { echo "error: 样例同步失败"; exit 1; }
+[ -f "$SAMPLE_DST/e53_sc1_example.cpp" ] || { echo "error: 样例同步失败"; exit 1; }
 
 # 凭据不随每次构建盲拷:内容没变就原样放回,缺失或有更新才写入
 SRC_CONF="$REPO_ROOT/C3_e53_sc1_pls/include/app_config.h"

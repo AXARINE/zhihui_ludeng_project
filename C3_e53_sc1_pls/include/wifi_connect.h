@@ -16,6 +16,10 @@
 #ifndef __WIFI_CONNECT_H__
 #define __WIFI_CONNECT_H__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 int WifiConnect(const char *ssid,const char *psk);
 
 /***************************************************************
@@ -24,6 +28,10 @@ int WifiConnect(const char *ssid,const char *psk);
  * 返 回 值: 1 已连接,0 已断开
  ***************************************************************/
 int WifiConnectStatus(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* __WIFI_CONNECT_H__ */
 
