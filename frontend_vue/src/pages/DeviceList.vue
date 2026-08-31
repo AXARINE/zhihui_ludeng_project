@@ -236,7 +236,7 @@ onMounted(() => {
             {{ row.last_seen_at ? formatBeijingTime(row.last_seen_at) : '从未' }}
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right">
+        <el-table-column label="操作" width="340" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="viewDeviceDetail(row.id)">
               详情
@@ -268,6 +268,16 @@ onMounted(() => {
               :disabled="row.lamp === 'OFF'"
             >
               关灯
+            </el-button>
+            <!-- 自动模式按钮：和详情页一致，已在自动模式时置灰（disabled）防止重复下发 -->
+            <el-button
+              v-if="hasPerm('control:manual')"
+              size="small"
+              type="warning"
+              @click="controlDevice(row.id, 'auto')"
+              :disabled="row.mode === 'AUTO'"
+            >
+              自动
             </el-button>
             <!-- 无控制权限时显示提示 -->
             <el-tooltip v-if="!hasPerm('control:manual')" content="您没有控制路灯的权限" placement="top">
