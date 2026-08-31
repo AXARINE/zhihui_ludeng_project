@@ -80,7 +80,7 @@ onUnmounted(() => {
     <!-- ============================================ -->
     <header class="page-header">
       <p class="eyebrow">Smart Street Light</p>
-      <h1>智慧路灯管理系统</h1>
+      <h1>启晖智慧路灯管理系统</h1>
       <p class="subtitle">IoT 设备监控平台</p>
     </header>
 

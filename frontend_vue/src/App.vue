@@ -143,7 +143,7 @@ function handleLogout() {
     <div v-else class="app-container">
         <aside class="sidebar">
             <div class="logo">
-                <h2>智慧路灯</h2>
+                <h2>启晖智慧路灯</h2>
                 <p>IoT 管理系统</p>
             </div>
 

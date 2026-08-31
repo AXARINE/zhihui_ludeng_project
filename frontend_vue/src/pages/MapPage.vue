@@ -41,8 +41,9 @@ const router = useRouter()
 // 与 store 同款开关：VITE_USE_MOCK=false 时走真实后端
 const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false'
 
-// 演示点位（测试用灯，不接真实硬件）—— 直线排列定义在共享模块
-import { DEMO_LAMPS } from '@/constants/demoLamps'
+// 演示点位（测试用灯，不接真实硬件）—— 运行时状态统一由 deviceStore.demoDevices 管理（全局同步）
+import { useDeviceStore } from '@/stores/deviceStore'
+const deviceStore = useDeviceStore()
 
 // ---- 权限判断（与 DeviceList 同款写法） ----
 function hasPerm(code) {
@@ -177,7 +178,7 @@ async function fetchMapDevices() {
   loading.value = true
   try {
     const res = USE_MOCK ? await mockResponse(mockMapDeviceList) : await getMapDevices()
-    devices.value = [...(res || []), ...DEMO_LAMPS]
+    devices.value = [...(res || []), ...deviceStore.demoDevices]
     lastUpdated.value = formatBeijingTime(new Date().toISOString(), 'time')
     renderMarkers()
 

@@ -92,6 +92,10 @@ export const useDeviceStore = defineStore('device', {
     // 设备列表
     deviceList: [],
 
+    // 演示灯运行时状态（全局唯一真源：MapPage / 首页大屏 / 设备列表共享同一批对象，
+    // 任何页面控灯后其他页面自动同步）
+    demoDevices: DEMO_LAMPS.map(normalizeDevice),
+
     // 告警列表
     alarmList: [],
 
@@ -193,8 +197,8 @@ export const useDeviceStore = defineStore('device', {
           res = await getDeviceList()
         }
 
-        // 【关键】统一转大写后再存进 store；并合并演示灯（测试用灯，全局模块可见）
-        this.deviceList = [...(res || []).map(normalizeDevice), ...DEMO_LAMPS.map(normalizeDevice)]
+        // 【关键】统一转大写后再存进 store；合并演示灯（引用同一批对象，全局同步）
+        this.deviceList = [...(res || []).map(normalizeDevice), ...this.demoDevices]
         console.log('设备列表加载成功：', this.deviceList)
       } catch (error) {
         console.log('设备列表加载失败：', error)
@@ -263,13 +267,13 @@ export const useDeviceStore = defineStore('device', {
       try {
         console.log('控制设备：', deviceId, action)
 
-        // 演示灯：本地模拟控制（不调后端，避免 404）
-        const demoDev = this.deviceList.find(d => d.id === deviceId && d.demo)
+        // 演示灯：本地模拟控制（改全局 demoDevices，所有页面同步）
+        const demoDev = this.demoDevices.find(d => d.id === deviceId)
         if (demoDev) {
           if (action === 'on') { demoDev.lamp = 'ON'; demoDev.mode = 'MANUAL' }
           else if (action === 'off') { demoDev.lamp = 'OFF'; demoDev.mode = 'MANUAL' }
           else if (action === 'auto') { demoDev.mode = 'AUTO' }
-          return
+          return { success: true, message: '演示灯控制成功（本地模拟）' }
         }
 
         if (USE_MOCK) {

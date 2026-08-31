@@ -32,7 +32,7 @@ const props = defineProps({
   },
   deviceName: {
     type: String,
-    default: '智慧路灯'
+    default: '启晖智慧路灯'
   },
   initialStatus: {
     type: String,

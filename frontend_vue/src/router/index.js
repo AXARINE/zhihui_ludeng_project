@@ -94,7 +94,7 @@ const router = createRouter({
 // 路由守卫：未登录跳转登录页
 // 每次路由切换时验证 token 有效性，防止重启前端后自动登录旧账号
 router.beforeEach(async (to, from, next) => {
-  document.title = to.meta.title ? `${to.meta.title} - 智慧路灯系统` : '智慧路灯系统'
+  document.title = to.meta.title ? `${to.meta.title} - 启晖智慧路灯管理系统` : '启晖智慧路灯管理系统'
 
   // 公开页面（如登录页）直接放行
   if (to.meta.public) {

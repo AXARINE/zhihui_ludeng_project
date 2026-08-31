@@ -37,7 +37,7 @@ async function handleLogin() {
       <!-- 左侧品牌区（窄屏隐藏） -->
       <div class="brand-pane">
         <div class="brand-mark">灯</div>
-        <h1>智慧路灯</h1>
+        <h1>启晖智慧路灯</h1>
         <p class="brand-sub">IoT 管理系统</p>
         <p class="brand-foot">BearPi-HM Nano · 华为云 IoTDA</p>
       </div>
