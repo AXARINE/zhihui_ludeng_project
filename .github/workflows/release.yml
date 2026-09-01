@@ -19,6 +19,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 质量门禁放在最前:测试挂了就别浪费时间构建,更别把坏版本挂上 Release
+      - name: 质量门禁(cargo test)
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: backend
+      - run: cargo test --manifest-path backend/Cargo.toml --quiet
+
       - name: 构建前端 dist
         uses: actions/setup-node@v4
         with:
