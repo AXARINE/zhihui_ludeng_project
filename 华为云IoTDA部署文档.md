@@ -107,7 +107,7 @@ cp C3_e53_sc1_pls/include/app_config.example.h C3_e53_sc1_pls/include/app_config
 
 ### 5.1 发布部署包(config.json 一键部署,推荐)
 
-适合"发给别人 / 服务器从零部署"。**push 到 master 即自动发版**:CI 跑测试 → 构建 → 按最新 tag 补丁号 +1 自动定版打 tag → 产出 `streetlight-deploy-<版本>.tar.gz` 挂到 GitHub Release(纯文档/固件/工具改动不触发)。需要指定版本号时,在 Actions 页手动运行工作流并填 `version`。
+适合"发给别人 / 服务器从零部署"。**push 到 master 即自动发版**:CI 跑测试 → 构建 → 按最新 tag 补丁号 +1 自动定版 → 产出 `streetlight-deploy-<版本>.tar.gz` 连同 tag 一起挂到 GitHub Release(纯文档/固件/工具改动不触发)。**连续 push 只发最后一版**(旧 run 自动取消);需要给某个中间提交补包时,在 Actions 页手动运行工作流并填 `version`。
 
 ```bash
 tar xzf streetlight-deploy-*.tar.gz && cd streetlight-deploy-*/

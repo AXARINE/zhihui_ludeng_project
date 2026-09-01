@@ -4,9 +4,10 @@
 #   - push 到 master(忽略纯文档/固件/工具改动,这些不影响部署包)
 #   - 手动运行(workflow_dispatch),可指定版本号覆盖自动递增
 #
-# 版本号:取现有最大 v 标签的补丁号 +1(无标签则 v0.1.0);tag 在构建全部成功后才创建,
-#        构建失败不会白白消耗版本号。工作流用 GITHUB_TOKEN 推 tag,GitHub 不会因此
-#        再触发一次本工作流(官方的递归保护),所以不会自我循环。
+# 版本号:取现有最大 v 标签的补丁号 +1(无标签则 v0.1.0)。tag 由最后一步的 Release API
+#        连同 Release 一起创建,构建失败或 run 被取消都不会消耗版本号、也不留孤儿 tag。
+#        该调用用 GITHUB_TOKEN,GitHub 不会因此再触发一次本工作流(官方的递归保护),
+#        所以不会自我循环。连续 push 只发最后一版(见 concurrency)。
 #
 # 部署包内容:docker-compose.yml、deploy.sh、config.example.json、
 #             site/(前端静态产物)、images/streetlight-backend.tar(瘦镜像)
@@ -32,9 +33,10 @@ permissions:
   contents: write
 
 concurrency:
-  # 连续 push 时只发最后一版,避免并行跑出两个版本号
+  # 连续 push 只发最后一版:新 run 一起,同组里排队/在跑的旧 run 直接取消。
+  # 中间提交没有独立部署包(也没人需要下载中间态),要补就手动跑一次指定版本号。
   group: release
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   release:
@@ -107,17 +109,13 @@ jobs:
           echo "BUNDLE_TGZ=${BUNDLE}.tar.gz" >> "$GITHUB_ENV"
           ls -lh "${BUNDLE}.tar.gz"
 
-      - name: 打 tag(构建全部成功后才创建)
-        run: |
-          set -euo pipefail
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "${{ steps.ver.outputs.tag }}" -m "Release ${{ steps.ver.outputs.tag }}"
-          git push origin "${{ steps.ver.outputs.tag }}"
-
-      - name: 发布 GitHub Release
+      # tag 不单独推:Release API 会在 tag 不存在时按 target_commitish 建出来,
+      # 于是"打 tag + 发 Release"是一次原子调用。若分成两步,run 一旦在两步之间
+      # 被 cancel-in-progress 取消,就会留下占着版本号却没有 Release 的孤儿 tag。
+      - name: 发布 GitHub Release(附带创建 tag)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
+          target_commitish: ${{ github.sha }} # 钉在本次构建的提交上,而非届时的分支头
           files: ${{ env.BUNDLE_TGZ }}
           generate_release_notes: true
