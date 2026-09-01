@@ -11,6 +11,7 @@
 #   ./dev.sh logs     跟踪日志(可加服务名,如: ./dev.sh logs backend)
 #   ./dev.sh status   查看服务状态
 #   ./dev.sh help     本帮助
+#   端口:5432/8080 只绑本机;对外入口用 ../deploy/(Caddy)
 # ============================================================
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -32,6 +33,9 @@ usage() {
   ./dev.sh db && ./dev.sh run    # 本地开发
   ./dev.sh up                    # 本地 / 云上一键部署
   ./dev.sh update                # 云上拉代码并重建后端
+
+注: 5432/8080 只绑 127.0.0.1（局域网不可直达）；
+    对外演示/发布部署用 ../deploy/（Caddy 单入口，见 backend/README.md §10.4）。
 EOF
 }
 
@@ -53,7 +57,7 @@ cmd_db() {
     return 0
   fi
   docker compose up -d postgres
-  echo "OK: postgres(5432) 已启动"
+  echo "OK: postgres(127.0.0.1:5432) 已启动"
 }
 
 cmd_run() {

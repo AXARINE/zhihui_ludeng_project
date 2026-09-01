@@ -178,9 +178,8 @@ git clone https://github.com/AXARINE/zhihui_ludeng_project.git
 cd zhihui_ludeng_project/backend
 cp .env.example .env && vim .env
 
-# 3) 裁剪 compose(生产)
-#    - 删除 postgres 的 ports: "5432:5432" 映射,数据库绝不对外;
-#    - 后端保留 8080:8080,后续由反向代理收敛到 443。
+# 3) compose 端口已默认只绑 127.0.0.1(5432/8080 局域网不可直达);
+#    对外提供前端/API 入口请直接用 5.4 的发布部署包(Caddy 单入口)。
 
 # 4) 启动
 docker compose up -d --build
@@ -192,19 +191,34 @@ docker logs -f streetlight-backend
 
 看到 `database migrated` 与 `http listening on 0.0.0.0:8080` 即成功;首次启动自动建表并创建引导管理员。
 
-### 5.4 HTTPS 反向代理(推荐 Caddy,前端静态托管 + 后端反代一步到位)
+### 5.4 发布部署包(瘦镜像 + Caddy 单入口,一键部署,推荐)
 
-先构建前端产物:
+后端已支持**静态 musl 编译成 scratch 瘦镜像**(`backend/Dockerfile`),仓库打 tag 后 GitHub Actions 自动构建部署包,适合"发给别人 / 服务器从零一键部署":
+
+```bash
+# 发布方(本仓库):打 tag 触发 CI
+git tag v0.1.0 && git push origin v0.1.0
+# → GitHub Release 出现 streetlight-deploy-v0.1.0.tar.gz
+```
+
+```bash
+# 使用方(任何装了 Docker 的机器):
+curl -LO https://github.com/AXARINE/zhihui_ludeng_project/releases/latest/download/streetlight-deploy-v0.1.0.tar.gz
+tar xzf streetlight-deploy-v0.1.0.tar.gz && cd streetlight-deploy-v0.1.0/
+./deploy.sh    # 首次运行生成 .env;填完 AK/SK、JWT_SECRET 等后再次运行
+# 等价于:docker load -i images/streetlight-backend.tar && docker compose up -d
+```
+
+部署包自带:Caddy(80/443 单入口,托管前端 `site/` 并反代 `/api`、`/docs`)、后端瘦镜像、PostgreSQL(默认不映射宿主端口)。`deploy.sh` 会拦截未填写的占位值,避免默认密钥上线。访问 `http://<服务器IP>/` 即前端;有域名时把 `Caddyfile` 里的 `:80` 换成域名即可自动申请 HTTPS。安全组只放行 80/443。
+
+> 开发栈 `backend/docker-compose.yml` 的 5432/8080 已默认只绑 127.0.0.1(局域网不可直达);对外一律走本节的 Caddy 入口。
+
+不想要容器化 Caddy、偏好宿主机 Caddy(apt)时,备选手工路径:
 
 ```bash
 cd frontend_vue
 npm install && npm run build          # 产物在 frontend_vue/dist/
 sudo mkdir -p /srv/streetlight && sudo cp -r dist/* /srv/streetlight/
-```
-
-再装 Caddy:
-
-```bash
 sudo apt install -y caddy
 ```
 
@@ -238,6 +252,7 @@ sudo systemctl reload caddy
 
 ### 5.5 上线加固
 
+- 部署包路径下 `deploy.sh` 会拦截未填写的占位值(AK/SK/endpoint/JWT_SECRET),拒绝带默认值启动;
 - `JWT_SECRET` 必须替换为随机值;
 - **两个引导账号**首次启动前都设成强密码:`BOOTSTRAP_SUPER_ADMIN_USERNAME/PASSWORD` 与 `BOOTSTRAP_ADMIN_USERNAME/PASSWORD`(默认 `superadmin/superadmin123`、`admin/admin123` 仅开发用);上线后用 API 创建正式账号并删除默认引导账号。
   - ⚠️ **守卫**:代码禁止禁用/删除/降级**最后一个启用的 super_admin**(防锁死),因此删除默认 superadmin 前须先创建一个新的 super_admin 账号;
@@ -274,9 +289,13 @@ sudo systemctl reload caddy
 ### 7.1 更新
 
 ```bash
-# 后端(云服务器)
+# 后端(云服务器,源码方式)
 cd zhihui_ludeng_project && git pull
 cd backend && docker compose up -d --build   # 新 migration 自动执行
+
+# 后端(云服务器,部署包方式)
+# 下载新版 streetlight-deploy-*.tar.gz → 解包覆盖(images/、docker-compose.yml 等)→ ./deploy.sh
+# 数据卷按名保留,历史数据不丢
 
 # 固件(本地 WSL)
 ./build.sh && ./flash.sh 4
@@ -316,5 +335,5 @@ cd backend && docker compose up -d --build   # 新 migration 自动执行
 
 - 固件:改 `C3_e53_sc1_pls/`(权威副本,勿直接改 submodule 树)→ `./build.sh` → `./flash.sh 4` → RESET ×2 → 串口验证;
 - 后端:改 `backend/src/` → `cargo build` → curl 验证 REST API;新接口必须补 `#[utoipa::path]` 注解并登记进 `openapi.rs`(含 `report.rs`/`notify.rs` 等新增模块);
-- 前端:改 `frontend_vue/src/` → `npm run build` → 把 `dist/` 部署到 `/srv/streetlight`(见 5.4);
+- 前端:改 `frontend_vue/src/` → `npm run build` → 把 `dist/` 覆盖到 `deploy/site/`(部署包方式,见 5.4)或 `/srv/streetlight`(宿主机 Caddy);
 - 数据库 schema:上线前可直接改 `migrations/0001_init.sql` 并清卷重建;**上线后必须新建递增迁移**(当前已到 `0007_notifications.sql`,新增从 `0008_` 起编号)。
