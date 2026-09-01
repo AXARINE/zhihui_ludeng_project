@@ -319,9 +319,6 @@ onMounted(() => {
             :step="1"
             show-input
           />
-          <div class="form-tip">
-            光照强度低于此值时自动开灯（单位：lux）
-          </div>
         </el-form-item>
 
         <!-- 操作按钮 -->
@@ -378,9 +375,6 @@ onMounted(() => {
               保存亮度
             </el-button>
           </div>
-          <div class="form-tip">
-            设置后设备进入手动模式并亮到该档（0 = 关灯），自动模式不受影响
-          </div>
         </el-form-item>
       </el-form>
 
@@ -430,46 +424,6 @@ onMounted(() => {
     <el-card v-if="!selectedDeviceId" class="info-card">
       <div class="no-device">
         <p>👈 请先选择要配置的设备</p>
-      </div>
-    </el-card>
-
-    <!-- ============================================ -->
-    <!-- 配置说明 -->
-    <!-- ============================================ -->
-    <el-card class="info-card">
-      <template #header>
-        <h3>配置说明</h3>
-      </template>
-
-      <div class="info-content">
-        <h4>光照阈值</h4>
-        <p>
-          光照阈值是控制路灯自动开关的关键参数。当环境光照强度低于设定的阈值时，
-          系统会自动开启路灯；当光照强度高于阈值时，系统会自动关闭路灯。
-        </p>
-
-        <h4>自动模式</h4>
-        <p>
-          在设备卡片中，点击"自动"按钮可以切换设备的工作模式。
-          自动模式下，设备会根据光照阈值自动控制路灯开关。
-        </p>
-
-        <h4>手动亮度</h4>
-        <p>
-          设置后设备进入手动模式并亮到对应档位（0 = 关灯），
-          亮度为感知亮度（设备端按 γ=2.2 曲线换算 PWM 占空比）。
-        </p>
-
-        <h4>照度-亮度曲线</h4>
-        <p>
-          自动模式下启用曲线后，路灯不再简单开关，而是按环境照度线性插值调节亮度：
-          首点固定在亮度轴（照度 0 lux，全暗时最亮），末点固定在照度轴（亮度 0%，
-          足够亮时熄灭），中间点（最多 2 个）自由增删；首点以下取首点亮度、末点以上取末点亮度。
-          曲线为空时自动模式回退为阈值开关灯。
-          可在预览图中直接拖动圆点调整锚点（也可修改下方数字精确输入）；
-          预览图默认使用对数横轴（照度 100 lux 起，符合人眼对亮度的感知），
-          可切换线性轴核对真实调光轨迹。
-        </p>
       </div>
     </el-card>
   </div>
@@ -529,12 +483,6 @@ onMounted(() => {
   font-size: 18px;
 }
 
-.form-tip {
-  font-size: 12px;
-  color: #b4ada3;
-  margin-top: 4px;
-}
-
 .brightness-row {
   display: flex;
   align-items: center;
@@ -559,20 +507,5 @@ onMounted(() => {
   padding: 40px;
   color: #8a837b;
   font-size: 16px;
-}
-
-.info-content h4 {
-  margin: 20px 0 10px 0;
-  color: #1f1c19;
-}
-
-.info-content h4:first-child {
-  margin-top: 0;
-}
-
-.info-content p {
-  margin: 0 0 15px 0;
-  color: #57504a;
-  line-height: 1.7;
 }
 </style>
