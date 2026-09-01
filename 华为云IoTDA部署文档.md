@@ -198,13 +198,13 @@ docker logs -f streetlight-backend
 ```bash
 # 发布方(本仓库):打 tag 触发 CI
 git tag v0.1.0 && git push origin v0.1.0
-# → GitHub Release 出现 streetlight-deploy-v0.1.0.tar.gz
+# → GitHub Release 出现 streetlight-deploy-0.1.0.tar.gz(资产名不带 v)
 ```
 
 ```bash
 # 使用方(任何装了 Docker 的机器):
-curl -LO https://github.com/AXARINE/zhihui_ludeng_project/releases/latest/download/streetlight-deploy-v0.1.0.tar.gz
-tar xzf streetlight-deploy-v0.1.0.tar.gz && cd streetlight-deploy-v0.1.0/
+curl -LO https://github.com/AXARINE/zhihui_ludeng_project/releases/latest/download/streetlight-deploy-0.1.0.tar.gz
+tar xzf streetlight-deploy-0.1.0.tar.gz && cd streetlight-deploy-0.1.0/
 ./deploy.sh    # 首次运行生成 .env;填完 AK/SK、JWT_SECRET 等后再次运行
 # 等价于:docker load -i images/streetlight-backend.tar && docker compose up -d
 ```
