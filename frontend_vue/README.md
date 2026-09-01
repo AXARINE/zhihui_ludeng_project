@@ -57,6 +57,8 @@ npm run dev
 npm run build
 ```
 
+产物在 `dist/`。要打进发布部署包：复制 `dist/` 内容到 `../deploy/site/`，或直接打 tag 走 CI 自动出包（见仓库根 README 与部署文档 5.4）。
+
 ## 主要功能
 
 1. **首页大屏**：设备统计、图表展示

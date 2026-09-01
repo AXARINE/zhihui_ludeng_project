@@ -1,8 +1,8 @@
 # 智慧路灯后端一键部署:PostgreSQL + Rust 后端
 #
 # 本地(WSL):cd backend && docker compose up -d --build
-# 云服务器:同一份文件直接可用 —— 把 .env 复制过去填好华为云配置即可;
-#           建议去掉 postgres 的 ports 映射(不对外暴露数据库),用安全组放行 8080。
+# 端口策略:5432/8080 只绑 127.0.0.1(本机访问,局域网不可达);
+#           对外演示/公网部署请用 ../deploy/(瘦镜像 + Caddy 单入口,见部署文档 5.4)。
 #
 # 数据卷复用历史卷 streetlight-pgdata(原 infra-up.sh 创建),已注册设备等数据不丢。
 # 后端环境变量来自 .env(env_file),其中 DATABASE_URL 被下方 environment 覆盖为
@@ -19,7 +19,7 @@ services:
       POSTGRES_USER: streetlight
       POSTGRES_PASSWORD: streetlight
     ports:
-      - "5432:5432" # 云部署时删除本映射
+      - "127.0.0.1:5432:5432" # 只绑本机;云部署/发布部署建议直接删除本映射
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -42,26 +42,11 @@ services:
       ARGON2_MAX_CONCURRENCY: "${ARGON2_MAX_CONCURRENCY:-32}"
       LOGIN_RATE_LIMIT_PER_MIN: "${LOGIN_RATE_LIMIT_PER_MIN:-30}"
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080" # 只绑本机;对外入口统一走 deploy/ 的 Caddy
     depends_on:
       postgres:
         condition: service_healthy
     restart: unless-stopped
-
-  # 电子表格式数据查看(Airtable 风格,主要看数据用):
-  # 浏览器打开 http://localhost:8081,首次注册一个本地账号,
-  # 然后 Connect to external database -> PostgreSQL ->
-  # host=postgres user/password/database=streetlight
-  nocodb:
-    image: nocodb/nocodb:latest
-    container_name: streetlight-nocodb
-    ports:
-      - "8081:8080" # 云部署时删除本服务
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-
 volumes:
   pgdata:
     name: streetlight-pgdata

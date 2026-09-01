@@ -1,0 +1,55 @@
+# 发布部署包:打 tag(v*)自动构建后端瘦镜像 + 前端 dist,组装成一键部署包挂到 GitHub Release
+#
+# 部署包内容:docker-compose.yml、Caddyfile、deploy.sh、.env.example、
+#             site/(前端静态产物)、images/streetlight-backend.tar(瘦镜像)
+# 使用者:tar xzf 部署包 → 填 .env → ./deploy.sh(docker load + compose up -d)
+name: Release 部署包
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 构建前端 dist
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend_vue/package-lock.json
+      - run: npm ci
+        working-directory: frontend_vue
+      - run: npm run build
+        working-directory: frontend_vue
+
+      - name: 构建后端瘦镜像(静态 musl → scratch)
+        # 境外 runner 直连 crates.io 更快,故关闭 rsproxy 镜像
+        run: docker build -t streetlight-backend:latest --build-arg USE_RS_PROXY=0 backend/
+
+      - name: 组装部署包
+        run: |
+          set -euxo pipefail
+          VERSION="${GITHUB_REF_NAME#v}"
+          BUNDLE="streetlight-deploy-${VERSION}"
+          mkdir -p "$BUNDLE/images" "$BUNDLE/site"
+          cp -r frontend_vue/dist/. "$BUNDLE/site/"
+          cp deploy/docker-compose.yml deploy/Caddyfile deploy/deploy.sh "$BUNDLE/"
+          cp backend/.env.example "$BUNDLE/.env.example"
+          chmod +x "$BUNDLE/deploy.sh"
+          docker save streetlight-backend:latest -o "$BUNDLE/images/streetlight-backend.tar"
+          tar -czf "${BUNDLE}.tar.gz" "$BUNDLE"
+          echo "BUNDLE_TGZ=${BUNDLE}.tar.gz" >> "$GITHUB_ENV"
+          ls -lh "${BUNDLE}.tar.gz"
+
+      - name: 发布 GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.BUNDLE_TGZ }}
+          generate_release_notes: true

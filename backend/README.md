@@ -49,7 +49,7 @@ backend/
 ├── rustfmt.toml              # 格式化配置：max_width = 80
 ├── .env.example              # 环境变量模板（复制为 .env 后填写，.env 不入库）
 ├── Dockerfile                # 多阶段构建镜像
-├── docker-compose.yml        # PostgreSQL + 后端 + nocodb 一键部署
+├── docker-compose.yml        # PostgreSQL + 后端 一键部署
 ├── dev.sh                    # 统一入口：db/run/up/down/update/logs/status（见 §3.2/3.3）
 ├── migrations/
 │   ├── 0001_init.sql         # 业务表：device/lux_record/config/alarm/command_record
@@ -114,15 +114,14 @@ docker compose up -d --build
 # 或统一入口: ./dev.sh up
 ```
 
-启动三个容器：
+启动两个容器：
 
 | 服务 | 端口 | 说明 |
 |---|---|---|
-| `postgres` | 5432 | 数据卷 `streetlight-pgdata`，历史数据不丢 |
-| `backend` | 8080 | 读取 `.env`，`DATABASE_URL` 被 compose 覆盖为内部服务名 `postgres` |
-| `nocodb` | 8081 | 可选，电子表格式看数据用；云部署可删除 |
+| `postgres` | 5432（仅 127.0.0.1） | 数据卷 `streetlight-pgdata`，历史数据不丢 |
+| `backend` | 8080（仅 127.0.0.1） | 读取 `.env`，`DATABASE_URL` 被 compose 覆盖为内部服务名 `postgres` |
 
-云服务器部署：同一份 compose 文件 + 填好的 `.env` 即可；建议删除 postgres 的 `5432:5432` 与 nocodb 端口映射，只放行 8080。云上更新代码用 `./dev.sh update`（见 §10.3）。
+两个端口默认只绑本机回环，局域网/公网不可直达；对外演示或云部署用发布部署包 `../deploy/`（Caddy 单入口 80/443 + 前端托管，见 §10.4）。云上更新代码用 `./dev.sh update`（见 §10.3）。
 
 ### 3.4 快速验证
 
@@ -793,15 +792,17 @@ cargo build
 
 ### 10.1 Docker 构建要点（Dockerfile）
 
-- 多阶段：`rust:1-bookworm` 编译（crates 走 rsproxy.cn 稀疏镜像加速）→ `debian:bookworm-slim` 运行。
-- 运行镜像安装 ca-certificates（北向 HTTPS 必需）并配置 `gai.conf` 提高 IPv4 优先级。
+- 多阶段：**`rust:1-alpine` 编译 → `scratch` 运行**。alpine 宿主即 musl，产出不依赖 glibc 的**静态二进制**；运行镜像只有二进制 + CA 证书 + gai.conf，无 shell/包管理器（体积小、攻击面最小）。
+- crates 默认走 rsproxy.cn 稀疏镜像加速；境外 CI 构建传 `--build-arg USE_RS_PROXY=0` 走官方源。
+- builder 需 `build-base cmake perl`：reqwest rustls 的加密后端 aws-lc-sys 要编译 C 代码。
+- TLS 证书链：builder 的 `/etc/ssl/certs/ca-certificates.crt` 拷入 scratch（rustls 平台验证器读取，北向 HTTPS 必需）；`gai.conf` 同拷，保持 IPv4 优先。
 - `.dockerignore` 排除 `target/` 与 `.env`。
 
 ### 10.2 compose 要点
 
 - `postgres` 带 healthcheck，`backend` 等 `service_healthy` 后启动，`restart: unless-stopped`。
 - 数据卷 `pgdata` 用固定名称 `streetlight-pgdata` 复用历史数据。
-- 云部署建议删除 postgres/nocodb 的端口映射，仅保留 8080。
+- **端口只绑 127.0.0.1**（5432/8080 局域网不可直达）；本机调试直连即可，对外入口统一走 `../deploy/` 的 Caddy。
 
 ### 10.3 云上更新后端（dev.sh update）
 
@@ -811,6 +812,15 @@ cd backend
 ```
 
 流程：`git pull --ff-only` → 构建 backend 镜像 → 只重建 backend 容器（数据库等其他服务不动）→ 轮询 `/api/health` 直到通过（超时默认 60s，可用 `BACKEND_HEALTH_URL` / `BACKEND_HEALTH_TIMEOUT` 覆盖）→ 打印状态与最近日志。健康检查失败时退出码非 0。
+
+### 10.4 发布部署包（瘦镜像 + Caddy，给他人一键部署）
+
+面向“发给别人 / 服务器从零一键部署”的场景，由 `../deploy/` 目录 + GitHub Actions 自动出包：
+
+- 打 tag（`git tag v0.1.0 && git push origin v0.1.0`）触发 `.github/workflows/release.yml`：构建前端 dist → 构建后端瘦镜像 → 组装 `streetlight-deploy-<版本>.tar.gz` → 挂到 GitHub Release。
+- 部署包内容：`docker-compose.yml`（postgres + backend + caddy）、`Caddyfile`、`deploy.sh`、`.env.example`、`site/`（前端产物）、`images/streetlight-backend.tar`（瘦镜像）。
+- 使用者三步：解包 → 填 `.env` → `./deploy.sh`（自动 `docker load` + `compose up -d`）；`deploy.sh` 会拦截未填写的占位值（AK/SK/endpoint/JWT_SECRET），避免带默认密钥上线。
+- 端口策略：对外只有 Caddy 80/443；后端 8080 只绑 127.0.0.1；数据库默认不映射宿主端口。数据卷默认 `streetlight-deploy-pgdata`，想复用开发栈历史数据就在 `.env` 设 `PGDATA_VOLUME=streetlight-pgdata`。
 
 ---
 

@@ -1,0 +1,73 @@
+# 智慧路灯发布部署:PostgreSQL + 后端(瘦镜像)+ Caddy 单入口
+#
+# 与 backend/docker-compose.yml(开发栈)的区别:
+# - 后端用"静态 musl 编译的 scratch 瘦镜像"(streetlight-backend:latest),不现场编译;
+# - 对外只暴露 Caddy 的 80/443,前端静态站点由 Caddy 托管,/api 反代给后端;
+# - 后端 8080 只绑 127.0.0.1,数据库默认完全不映射宿主机端口;
+# - 数据卷默认 streetlight-deploy-pgdata,与开发栈(streetlight-pgdata)互不干扰。
+#
+# 用法(Release 部署包):tar xzf streetlight-deploy-*.tar.gz && cd 对应目录 && ./deploy.sh
+# 本仓库内直接跑:cd deploy && ./deploy.sh(会从 ../backend/.env.example 生成 .env)
+
+name: streetlight-deploy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: streetlight-deploy-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-streetlight}
+      POSTGRES_USER: ${POSTGRES_USER:-streetlight}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-streetlight}
+    # 数据库默认不对宿主机开放(服务器上更安全);本机调试可取消注释(仅 127.0.0.1)
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-streetlight} -d $${POSTGRES_DB:-streetlight}"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  backend:
+    # 瘦镜像:由 CI 静态编译(见 backend/Dockerfile),部署包内 images/streetlight-backend.tar
+    image: streetlight-backend:latest
+    container_name: streetlight-deploy-backend
+    env_file: .env # HUAWEI_AK/SK、HUAWEI_PROJECT_ID、HUAWEI_IOTDA_ENDPOINT/REGION、JWT_SECRET 等
+    environment:
+      # 覆盖 .env 里的 127.0.0.1,走 compose 内部服务名(与开发栈同款约定)
+      DATABASE_URL: postgres://${POSTGRES_USER:-streetlight}:${POSTGRES_PASSWORD:-streetlight}@postgres:5432/${POSTGRES_DB:-streetlight}
+      IOTHUB_DRY_RUN: "${IOTHUB_DRY_RUN:-false}"
+      DATABASE_POOL_SIZE: "${DATABASE_POOL_SIZE:-20}"
+      ARGON2_MAX_CONCURRENCY: "${ARGON2_MAX_CONCURRENCY:-32}"
+      LOGIN_RATE_LIMIT_PER_MIN: "${LOGIN_RATE_LIMIT_PER_MIN:-30}"
+    ports:
+      - "127.0.0.1:8080:8080" # 仅本机调试用;对外只走 Caddy
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: streetlight-deploy-caddy
+    ports:
+      - "80:80" # 局域网/公网唯一入口(HTTP)
+      - "443:443" # 有域名后由 Caddy 自动申请证书走 HTTPS(见 Caddyfile 注释)
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./site:/srv:ro # 前端静态产物(frontend_vue 构建出的 dist)
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+    # 想复用开发栈/旧部署的历史数据时,在 .env 里设 PGDATA_VOLUME=streetlight-pgdata
+    name: ${PGDATA_VOLUME:-streetlight-deploy-pgdata}
+  caddy_data:
+  caddy_config:

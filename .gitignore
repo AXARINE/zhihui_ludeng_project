@@ -15,6 +15,8 @@ Thumbs.db
 desktop.ini
 backend/target/
 .env
+.env.*
+!.env.example
 AGENTS.md
 # 云凭证与设备密钥(勿提交)
 credentials.csv
@@ -26,6 +28,13 @@ frontend_vue/node_modules/
 frontend_vue/dist/
 frontend_vue/vite-dev.pid
 node-win-x64/
+
+# 发布部署包(deploy/):镜像 tar 与前端产物由 CI/本地构建生成,不入库;
+# site/ 只保留占位页,正式部署包由 CI 用 frontend_vue/dist 覆盖
+deploy/.env
+deploy/images/
+deploy/site/*
+!deploy/site/index.html
 
 # 测试数据工具(tools/db-seeder)的 uv 虚拟环境与 Python 缓存
 tools/db-seeder/.venv/
