@@ -1,16 +1,50 @@
 // 维护智能问答（本地检索增强，无需外部大模型）
 //
-// 流程：意图识别（关键词加权）→ 实体抽取（设备 / 时间窗）→ 真查业务表 → 模板生成回答。
-// 逻辑移植自 smart-street-light/backend/main.py（Python 版），表名适配本仓库 Rust 后端：
+// 流程：意图识别（关键词加权）→ 实体抽取（设备 / 时间窗）→ 真查业务表 → 知识库匹配调修建议。
+// 回答除文本外还带 related_devices：告警涉及的设备 id 列表，前端渲染成可点击标签，
+// 管理员点击即跳转设备详情页，实现"查找锁定"。
+// 逻辑源自 smart-street-light/backend/main.py（Python 版），表名适配本仓库 Rust 后端：
 //   alarm / lux_record / config / device / command_record / maintenance_knowledge
 use chrono::{DateTime, Duration, Utc};
 use regex::Regex;
+use serde_json::json;
 use sqlx::postgres::PgArguments;
 use sqlx::query::QueryAs;
 use sqlx::{PgPool, Postgres};
 use std::sync::LazyLock;
 
-const KB_INTRO: &str = "知识库覆盖：离线、光照异常、频繁开关、通信超时、灯不亮、温度过高。可问我：告警情况、光照趋势、阈值设置、设备状态、控制指令或维护建议。";
+const KB_INTRO: &str = "知识库覆盖：离线、光照异常、频繁开关、通信超时、灯不亮、调光、亮度、读数不变、上报、常亮、误报、温度过高。可问我：告警情况及处理建议、光照趋势、阈值设置、设备状态、控制指令。";
+
+// ===== AI 生成层（可选）=====
+// OpenAI 兼容接口：DeepSeek / 智谱 GLM / Kimi / 通义均适用，换 base+model 即可。
+// backend/.env 配置 AI_API_KEY 即启用；不配则纯本地关键词问答。
+struct AiCfg {
+    key: String,
+    base: String,
+    model: String,
+}
+
+fn ai_cfg() -> Option<AiCfg> {
+    let key = std::env::var("AI_API_KEY")
+        .ok()
+        .filter(|k| !k.trim().is_empty() && !k.contains("这里"))?;
+    Some(AiCfg {
+        key,
+        base: std::env::var("AI_BASE_URL")
+            .unwrap_or_else(|_| "https://open.bigmodel.cn/api/paas/v4".into()),
+        model: std::env::var("AI_MODEL").unwrap_or_else(|_| "glm-4-flash".into()),
+    })
+}
+
+// 进程内复用一个 HTTP 客户端（内部带连接池，别每次请求新建）
+static HTTP: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
+
+/// 问答结果：text 是给人看的回答，devices 供前端生成"锁定设备"跳转标签
+#[derive(Default)]
+pub struct Answer {
+    pub text: String,
+    pub devices: Vec<String>,
+}
 
 // 查询行结构(FromRow 按列名映射,不再依赖"列顺序"注释)
 #[derive(sqlx::FromRow)]
@@ -20,6 +54,7 @@ struct AlarmRow {
     message: String,
     created_at: DateTime<Utc>,
     resolved_at: Option<DateTime<Utc>>,
+    location: Option<String>, // LEFT JOIN device 带出安装位置，用于"查找锁定"
 }
 
 #[derive(sqlx::FromRow)]
@@ -70,6 +105,10 @@ static RE_DEVICE_NUM: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"灯\s*(\d+)\s*号|(\d+)\s*号\s*灯|灯\s*(\d+)")
         .expect("valid regex")
 });
+
+// alarm.type 存英文(现在只有 offline)，知识库 keyword 是中文——
+// 匹配建议时按此表补一个中文词参与匹配；新增告警类型时在此补一行即可
+const ALARM_TYPE_KW: &[(&str, &str)] = &[("offline", "离线")];
 
 // 意图词典：命中关键词累加长度作得分（长词权重高），取最高分为意图
 const INTENTS: &[(&str, &[&str])] = &[
@@ -217,30 +256,139 @@ pub fn fmt_time(dt: DateTime<Utc>) -> String {
     dt.format("%m-%d %H:%M").to_string()
 }
 
-/// 主流程：识别意图与设备后,分发到各意图的处理函数
+/// 去重收集设备 id：优先未处理告警的设备，没有未处理则取全部
+fn collect_ids(rows: &[AlarmRow]) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for r in rows {
+        if r.resolved_at.is_some() || out.contains(&r.device_id) {
+            continue;
+        }
+        out.push(r.device_id.clone());
+    }
+    if !out.is_empty() {
+        return out;
+    }
+    for r in rows {
+        if !out.contains(&r.device_id) {
+            out.push(r.device_id.clone());
+        }
+    }
+    out
+}
+
+/// 主流程：配了 AI_API_KEY 走大模型生成，否则纯本地关键词问答。
+/// AI 失败自动回退本地回答，问答接口永不报错。
 pub async fn answer(
     pool: &PgPool,
     question: &str,
-) -> Result<String, sqlx::Error> {
+) -> Result<Answer, sqlx::Error> {
+    let local = answer_local(pool, question).await?;
+    let Some(cfg) = ai_cfg() else {
+        return Ok(local);
+    };
+    // 上下文包：设备清单 + 近7天告警（已含知识库建议）+ 本地意图回答。
+    // 数据量小（几盏灯/十几条告警），固定全带上，规避意图识别漏检。
+    let (ctx_alarms, alarm_devices) =
+        answer_alarm(pool, None, "最近7天有哪些告警", "全部设备").await?;
+    let (ctx_devices, _) = answer_devices(pool, None, "全部设备").await?;
+    let Answer {
+        text: local_text,
+        devices: local_devices,
+    } = local;
+    let devices =
+        if local_devices.is_empty() { alarm_devices } else { local_devices };
+    match ai_answer(&cfg, question, &ctx_devices, &ctx_alarms, &local_text)
+        .await
+    {
+        Ok(text) => Ok(Answer { text, devices }),
+        Err(e) => {
+            tracing::warn!("AI 回答失败，回退本地关键词回答: {e}");
+            Ok(Answer { text: local_text, devices })
+        }
+    }
+}
+
+/// 调 OpenAI 兼容 /chat/completions 生成回答；失败由调用方回退本地
+async fn ai_answer(
+    cfg: &AiCfg,
+    question: &str,
+    devices_txt: &str,
+    alarms_txt: &str,
+    local_txt: &str,
+) -> Result<String, Box<dyn std::error::Error>> {
+    let sys = "你是智慧路灯管理平台的维护助手，面向管理员。请依据给出的平台真实数据回答，\
+               不要编造数据里没有的设备或告警；用中文纯文本（不要 Markdown 符号），\
+               简洁分点；涉及故障时给出调修建议，并点名相关设备编号方便管理员定位。";
+    let user = format!(
+        "【设备清单】\n{devices_txt}\n\n【近7天告警（含维护建议）】\n{alarms_txt}\n\n\
+         【本地意图分析结果】\n{local_txt}\n\n【管理员提问】\n{question}"
+    );
+    let body = json!({
+        "model": cfg.model,
+        "messages": [
+            {"role": "system", "content": sys},
+            {"role": "user", "content": user}
+        ],
+        "temperature": 0.3,
+        "max_tokens": 600
+    });
+    let url = format!("{}/chat/completions", cfg.base.trim_end_matches('/'));
+    let resp = HTTP
+        .post(url)
+        .bearer_auth(&cfg.key)
+        .timeout(std::time::Duration::from_secs(60))
+        .json(&body)
+        .send()
+        .await?
+        .error_for_status()?;
+    let v: serde_json::Value = resp.json().await?;
+    let text = v["choices"][0]["message"]["content"]
+        .as_str()
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+    if text.is_empty() {
+        return Err("AI 返回为空".into());
+    }
+    Ok(text)
+}
+
+/// 本地流程：识别意图与设备后,分发到各意图的处理函数。
+/// 每个处理函数返回 (回答文本, 涉及设备列表)
+async fn answer_local(
+    pool: &PgPool,
+    question: &str,
+) -> Result<Answer, sqlx::Error> {
     let intent = classify_intent(question);
     let device_id = resolve_device(pool, question).await?;
+    let locked = device_id.clone().map_or_else(Vec::new, |d| vec![d]);
     let scope = device_id
         .as_deref()
         .map_or_else(|| "全部设备".to_string(), |d| format!("设备 {d}"));
     let dev = device_id.as_deref();
 
-    match intent {
-        "query_alarm" => answer_alarm(pool, dev, question, &scope).await,
+    let (text, devices) = match intent {
+        "query_alarm" => answer_alarm(pool, dev, question, &scope).await?,
         "query_luminance" => {
-            answer_luminance(pool, dev, question, &scope).await
+            (answer_luminance(pool, dev, question, &scope).await?, locked)
         }
-        "query_threshold" => answer_threshold(pool, dev, &scope).await,
-        "query_device" => answer_devices(pool, dev, &scope).await,
-        "query_command" => answer_commands(pool, dev, question, &scope).await,
-        _ => Ok(find_advice(pool, std::slice::from_ref(&question))
-            .await?
-            .unwrap_or_else(|| format!("没太理解您的问题。{KB_INTRO}"))),
-    }
+        "query_threshold" => {
+            (answer_threshold(pool, dev, &scope).await?, locked)
+        }
+        "query_device" => answer_devices(pool, dev, &scope).await?,
+        "query_command" => {
+            (answer_commands(pool, dev, question, &scope).await?, locked)
+        }
+        _ => (
+            find_advice(pool, std::slice::from_ref(&question))
+                .await?
+                .unwrap_or_else(|| {
+                    format!("没太理解您的问题。{KB_INTRO}")
+                }),
+            locked,
+        ),
+    };
+    Ok(Answer { text, devices })
 }
 
 async fn answer_alarm(
@@ -248,49 +396,66 @@ async fn answer_alarm(
     device_id: Option<&str>,
     question: &str,
     scope: &str,
-) -> Result<String, sqlx::Error> {
+) -> Result<(String, Vec<String>), sqlx::Error> {
     let (start, desc) = parse_window(question, 7);
+    // 未处理排前，方便管理员先看要修的；带出 device.location 用于定位
     let sql = if device_id.is_some() {
-        "SELECT device_id, type, message, created_at, resolved_at FROM alarm \
-         WHERE created_at >= $1 AND device_id = $2 ORDER BY created_at DESC LIMIT 20"
+        "SELECT a.device_id, a.type, a.message, a.created_at, a.resolved_at, d.location \
+         FROM alarm a LEFT JOIN device d ON d.id = a.device_id \
+         WHERE a.created_at >= $1 AND a.device_id = $2 \
+         ORDER BY (a.resolved_at IS NULL) DESC, a.created_at DESC LIMIT 20"
     } else {
-        "SELECT device_id, type, message, created_at, resolved_at FROM alarm \
-         WHERE created_at >= $1 ORDER BY created_at DESC LIMIT 20"
+        "SELECT a.device_id, a.type, a.message, a.created_at, a.resolved_at, d.location \
+         FROM alarm a LEFT JOIN device d ON d.id = a.device_id \
+         WHERE a.created_at >= $1 \
+         ORDER BY (a.resolved_at IS NULL) DESC, a.created_at DESC LIMIT 20"
     };
     let rows: Vec<AlarmRow> =
         bind_opt_device(sqlx::query_as(sql).bind(start), device_id)
             .fetch_all(pool)
             .await?;
     if rows.is_empty() {
-        return Ok(format!("{desc}，{scope}没有告警记录。"));
+        return Ok((format!("{desc}，{scope}没有告警记录。"), Vec::new()));
     }
     let unhandled = rows.iter().filter(|r| r.resolved_at.is_none()).count();
     let mut lines = vec![format!(
-        "{desc}，{scope}共 {} 条告警，未处理 {unhandled} 条：",
+        "{desc}，{scope}共 {} 条告警，未处理 {unhandled} 条（未处理排前）：",
         rows.len()
     )];
-    for r in rows.iter().take(5) {
+    for r in rows.iter().take(8) {
         let tag = if r.resolved_at.is_none() {
             "未处理"
         } else {
             "已处理"
         };
+        let loc = r
+            .location
+            .as_deref()
+            .filter(|l| !l.is_empty())
+            .map_or_else(|| "位置-".to_string(), |l| format!("位置{l}"));
         lines.push(format!(
-            "· {} {}（{tag}）{} {}",
+            "· {}（{loc}）{}（{tag}）{} {}",
             r.device_id,
             r.r#type,
             fmt_time(r.created_at),
             r.message
         ));
     }
-    let texts: Vec<&str> = rows
-        .iter()
-        .flat_map(|r| [r.r#type.as_str(), r.message.as_str()])
-        .collect();
+    // 调修建议：告警类型/消息 + 提问原文一起匹配知识库（英文类型经 ALARM_TYPE_KW 翻译）
+    let mut texts: Vec<&str> = vec![question];
+    for r in &rows {
+        texts.push(&r.r#type);
+        texts.push(&r.message);
+        if let Some((_, kw)) =
+            ALARM_TYPE_KW.iter().find(|(t, _)| *t == r.r#type)
+        {
+            texts.push(kw);
+        }
+    }
     if let Some(adv) = find_advice(pool, &texts).await? {
         lines.push(format!("维护建议：{adv}"));
     }
-    Ok(lines.join("\n"))
+    Ok((lines.join("\n"), collect_ids(&rows)))
 }
 
 async fn answer_luminance(
@@ -353,7 +518,7 @@ async fn answer_devices(
     pool: &PgPool,
     device_id: Option<&str>,
     scope: &str,
-) -> Result<String, sqlx::Error> {
+) -> Result<(String, Vec<String>), sqlx::Error> {
     let sql = if device_id.is_some() {
         "SELECT id, name, location, status, lamp, last_seen_at FROM device \
          WHERE id = $1 ORDER BY created_at"
@@ -365,7 +530,7 @@ async fn answer_devices(
         .fetch_all(pool)
         .await?;
     if rows.is_empty() {
-        return Ok("当前没有路灯设备。".to_string());
+        return Ok(("当前没有路灯设备。".to_string(), Vec::new()));
     }
     let mut lines = vec![format!("{scope}共 {} 台路灯：", rows.len())];
     for r in &rows {
@@ -387,7 +552,9 @@ async fn answer_devices(
             r.last_seen_at.map_or_else(|| "-".to_string(), fmt_time),
         ));
     }
-    Ok(lines.join("\n"))
+    // 全部返回，管理员可直接点标签跳到离线那盏
+    let devices = rows.iter().map(|r| r.id.clone()).collect();
+    Ok((lines.join("\n"), devices))
 }
 
 async fn answer_commands(

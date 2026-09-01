@@ -1,20 +1,27 @@
 <script setup>
 import { ref, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
 import { askAssistant } from '@/api/device.js'
 import { ChatDotRound, Promotion } from '@element-plus/icons-vue'
 
+const router = useRouter()
 const question = ref('')
 const messages = ref([])
 const loading = ref(false)
 const chatBox = ref(null)
 
 const quickQuestions = [
-  '最近7天有哪些告警？',
+  '最近7天有哪些告警？需要处理吗？',
+  '灯不亮怎么排查？',
+  '调光不生效是什么原因？',
   '设备现在在线吗？',
-  '光照阈值是多少？',
-  '最近的光照数据怎么样？',
   '路灯频繁开关怎么办？'
 ]
+
+// 点击回答下方的设备标签，跳转设备详情页"锁定"问题设备
+function goDevice(id) {
+  router.push(`/device/${id}`)
+}
 
 async function handleSend() {
   const q = question.value.trim()
@@ -28,7 +35,12 @@ async function handleSend() {
   loading.value = true
   try {
     const res = await askAssistant(q)
-    messages.value.push({ role: 'assistant', content: res.answer })
+    // devices = 告警/状态涉及的设备，渲染成可点击标签
+    messages.value.push({
+      role: 'assistant',
+      content: res.answer,
+      devices: res.related_devices || []
+    })
   } catch (e) {
     messages.value.push({ role: 'assistant', content: '请求失败，请检查网络连接。' })
   } finally {
@@ -53,7 +65,7 @@ async function scrollToBottom() {
 <template>
   <div class="page">
     <h3>🤖 维护智能问答</h3>
-    <p class="desc">基于知识库的路灯维护助手，支持告警查询、设备状态、维护建议等。</p>
+    <p class="desc">基于知识库的路灯维护助手：告警查询、调修建议、点击设备标签一键锁定定位。</p>
 
     <!-- 聊天区域 -->
     <div class="chat-container" ref="chatBox">
@@ -85,6 +97,20 @@ async function scrollToBottom() {
         </div>
         <div class="msg-bubble">
           <pre class="msg-text">{{ msg.content }}</pre>
+          <!-- 查找锁定：回答涉及的设备，点击跳转设备详情 -->
+          <div v-if="msg.devices && msg.devices.length" class="msg-devices">
+            <span class="lock-label">🔍 点击锁定设备：</span>
+            <el-tag
+              v-for="d in msg.devices"
+              :key="d"
+              type="warning"
+              size="small"
+              class="lock-tag"
+              @click="goDevice(d)"
+            >
+              {{ d }}
+            </el-tag>
+          </div>
         </div>
       </div>
 
@@ -219,6 +245,23 @@ async function scrollToBottom() {
 
 .loading-bubble {
   color: #8a837b;
+}
+
+.msg-devices {
+  margin-top: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.lock-label {
+  font-size: 12px;
+  color: #8a837b;
+}
+
+.lock-tag {
+  cursor: pointer;
 }
 
 .dot-anim::after {

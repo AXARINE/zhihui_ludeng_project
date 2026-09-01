@@ -92,7 +92,13 @@ export function unresolveAlarm(id) {
 // POST /api/assistant/ask
 // ============================================
 export function askAssistant(question) {
-  return request({ url: '/assistant/ask', method: 'post', data: { question } })
+  // AI 生成回答需 5~15 秒，覆盖全局 10 秒超时，否则前端必然报"请求失败"
+  return request({
+    url: '/assistant/ask',
+    method: 'post',
+    data: { question },
+    timeout: 60000
+  })
 }
 
 // ============================================
