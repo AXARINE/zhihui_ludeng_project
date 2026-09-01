@@ -37,10 +37,6 @@ fi
 # 环境变量（小组后端不自动读 .env）
 set -a; source .env; set +a
 
-# 启动后端（优先用已编译产物，改过代码则 cargo run）
+# 启动后端（cargo run 增量编译：改过代码会重编，没改则秒起——别直接跑旧 exe，会用到过期程序）
 echo "[..] 启动后端 http://127.0.0.1:8080 (Ctrl+C 停止)"
-if [ -f target/debug/streetlight-backend.exe ]; then
-  exec ./target/debug/streetlight-backend.exe
-else
-  exec cargo run
-fi
+exec cargo run

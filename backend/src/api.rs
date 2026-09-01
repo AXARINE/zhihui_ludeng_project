@@ -1475,6 +1475,8 @@ struct AssistantAskIn {
 #[derive(Serialize, ToSchema)]
 struct AssistantAnswer {
     answer: String,
+    /// 回答涉及的设备 id（如告警设备），前端渲染成可点击标签跳转设备详情
+    related_devices: Vec<String>,
 }
 
 #[utoipa::path(
@@ -1493,6 +1495,9 @@ async fn assistant_ask(
     Json(body): Json<AssistantAskIn>,
 ) -> Result<Json<AssistantAnswer>, Error> {
     auth.require(&s, "assistant:qa").await?;
-    let answer = assistant::answer(&s.db, &body.question).await?;
-    Ok(Json(AssistantAnswer { answer }))
+    let a = assistant::answer(&s.db, &body.question).await?;
+    Ok(Json(AssistantAnswer {
+        answer: a.text,
+        related_devices: a.devices,
+    }))
 }
