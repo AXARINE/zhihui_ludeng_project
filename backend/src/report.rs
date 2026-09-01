@@ -33,10 +33,34 @@ pub struct ReportContent {
     pub lamp_on: i64,
     pub alarms_today: i64,
     pub alarms_unhandled: i64,
+    /// 离线类告警数（告警类型 = offline）；旧数据缺省时按 0
+    #[serde(default)]
+    pub alarm_offline: i64,
     pub avg_lux: f64,
+    /// 当日光照最高值
+    #[serde(default)]
+    pub lux_max: i64,
+    /// 当日光照最低值
+    #[serde(default)]
+    pub lux_min: i64,
     pub reports_lux: i64,
     pub cmd_manual: i64,
     pub cmd_auto: i64,
+    /// 开灯指令数（action=on）
+    #[serde(default)]
+    pub cmd_on: i64,
+    /// 关灯指令数（action=off）
+    #[serde(default)]
+    pub cmd_off: i64,
+    /// 指令下发失败数（status=failed）
+    #[serde(default)]
+    pub cmd_failed: i64,
+    /// 在线率（百分比，保留 1 位）
+    #[serde(default)]
+    pub online_rate: f64,
+    /// 亮灯率（百分比，保留 1 位）
+    #[serde(default)]
+    pub lamp_on_rate: f64,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -64,23 +88,28 @@ async fn generate_report(db: &PgPool, date: NaiveDate) -> anyhow::Result<()> {
                 COUNT(*) FILTER (WHERE lamp = 'on') FROM device",
     )
     .fetch_one(db);
-    let alarm_fut = sqlx::query_as::<_, (i64, i64)>(
-        "SELECT COUNT(*), COUNT(*) FILTER (WHERE resolved_at IS NULL) \
+    let alarm_fut = sqlx::query_as::<_, (i64, i64, i64)>(
+        "SELECT COUNT(*), COUNT(*) FILTER (WHERE resolved_at IS NULL), \
+                COUNT(*) FILTER (WHERE type = 'offline') \
          FROM alarm WHERE created_at >= $1 AND created_at < $2",
     )
     .bind(day_start)
     .bind(day_end)
     .fetch_one(db);
-    let lux_fut = sqlx::query_as::<_, (i64, Option<f64>)>(
-        "SELECT COUNT(*), AVG(lux)::float8 FROM lux_record \
+    let lux_fut = sqlx::query_as::<_, (i64, Option<f64>, i64, i64)>(
+        "SELECT COUNT(*), AVG(lux)::float8, COALESCE(MAX(lux), 0)::bigint, \
+                COALESCE(MIN(lux), 0)::bigint FROM lux_record \
          WHERE created_at >= $1 AND created_at < $2",
     )
     .bind(day_start)
     .bind(day_end)
     .fetch_one(db);
-    let cmd_fut = sqlx::query_as::<_, (i64, i64)>(
+    let cmd_fut = sqlx::query_as::<_, (i64, i64, i64, i64, i64)>(
         "SELECT COUNT(*) FILTER (WHERE source = 'manual'), \
-                COUNT(*) FILTER (WHERE source = 'auto') \
+                COUNT(*) FILTER (WHERE source = 'auto'), \
+                COUNT(*) FILTER (WHERE action = 'on'), \
+                COUNT(*) FILTER (WHERE action = 'off'), \
+                COUNT(*) FILTER (WHERE status = 'failed') \
          FROM command_record WHERE created_at >= $1 AND created_at < $2",
     )
     .bind(day_start)
@@ -89,10 +118,15 @@ async fn generate_report(db: &PgPool, date: NaiveDate) -> anyhow::Result<()> {
 
     let (
         (devices_total, devices_online, lamp_on),
-        (alarms_today, alarms_unhandled),
-        (reports_lux, avg_lux),
-        (cmd_manual, cmd_auto),
+        (alarms_today, alarms_unhandled, alarm_offline),
+        (reports_lux, avg_lux, lux_max, lux_min),
+        (cmd_manual, cmd_auto, cmd_on, cmd_off, cmd_failed),
     ) = tokio::try_join!(dev_fut, alarm_fut, lux_fut, cmd_fut)?;
+
+    let online_rate =
+        if devices_total > 0 { (devices_online as f64 / devices_total as f64) * 100.0 } else { 0.0 };
+    let lamp_on_rate =
+        if devices_total > 0 { (lamp_on as f64 / devices_total as f64) * 100.0 } else { 0.0 };
 
     let content = ReportContent {
         date: date.format("%Y-%m-%d").to_string(),
@@ -101,10 +135,18 @@ async fn generate_report(db: &PgPool, date: NaiveDate) -> anyhow::Result<()> {
         lamp_on,
         alarms_today,
         alarms_unhandled,
+        alarm_offline,
         avg_lux: avg_lux.unwrap_or(0.0).round(),
+        lux_max,
+        lux_min,
         reports_lux,
         cmd_manual,
         cmd_auto,
+        cmd_on,
+        cmd_off,
+        cmd_failed,
+        online_rate: (online_rate * 10.0).round() / 10.0,
+        lamp_on_rate: (lamp_on_rate * 10.0).round() / 10.0,
     };
 
     // 序列化失败必须显式传播,不能静默写 null(后置条件:content 恒为合法日报 JSON)
@@ -123,13 +165,16 @@ async fn generate_report(db: &PgPool, date: NaiveDate) -> anyhow::Result<()> {
         db,
         "每日日报",
         &format!(
-            "{} 设备 {} 台(在线 {}),当日告警 {} 条,平均光照 {:.0} lux,手动指令 {} 次",
+            "{} 设备 {} 台(在线 {} · 在线率 {:.1}%),告警 {} 条(离线 {}),平均光照 {:.0} lux,手动指令 {} 次(失败 {})",
             content.date,
             content.devices_total,
             content.devices_online,
+            content.online_rate,
             content.alarms_today,
+            content.alarm_offline,
             content.avg_lux,
             content.cmd_manual,
+            content.cmd_failed,
         ),
     )
     .await?;

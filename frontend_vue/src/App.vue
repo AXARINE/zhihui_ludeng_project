@@ -98,6 +98,10 @@ function fmtNotifTime(iso) {
     const p = n => (n < 10 ? '0' : '') + n
     return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
+// 百分比兜底（旧日报数据可能没有新字段）
+function fmtPct(v) {
+    return (v == null ? '--' : v + '%')
+}
 refreshUnread()
 setInterval(refreshUnread, 30000)
 
@@ -266,20 +270,26 @@ function handleLogout() {
     </div>
 
     <!-- 今日日报弹窗 -->
-    <el-dialog v-model="reportVisible" title="📅 每日日报" width="540" append-to-body>
+    <el-dialog v-model="reportVisible" title="📅 每日日报" width="620" append-to-body>
         <template v-if="reportData">
             <div class="report-grid">
                 <div class="report-cell"><b>{{ reportData.content.devices_total }}</b><span>设备总数</span></div>
                 <div class="report-cell"><b>{{ reportData.content.devices_online }}</b><span>在线设备</span></div>
+                <div class="report-cell"><b>{{ fmtPct(reportData.content.online_rate) }}</b><span>在线率</span></div>
                 <div class="report-cell"><b>{{ reportData.content.lamp_on }}</b><span>亮灯数量</span></div>
-                <div class="report-cell"><b>{{ reportData.content.alarms_today }}</b><span>今日告警</span></div>
-                <div class="report-cell"><b>{{ reportData.content.alarms_unhandled }}</b><span>未处理告警</span></div>
+                <div class="report-cell"><b>{{ fmtPct(reportData.content.lamp_on_rate) }}</b><span>亮灯率</span></div>
                 <div class="report-cell"><b>{{ reportData.content.avg_lux }}</b><span>平均光照(lux)</span></div>
+                <div class="report-cell"><b>{{ reportData.content.lux_max }}</b><span>光照最高(lux)</span></div>
+                <div class="report-cell"><b>{{ reportData.content.lux_min }}</b><span>光照最低(lux)</span></div>
                 <div class="report-cell"><b>{{ reportData.content.reports_lux }}</b><span>光照上报次数</span></div>
+                <div class="report-cell"><b>{{ reportData.content.alarms_today }}</b><span>今日告警</span></div>
+                <div class="report-cell"><b>{{ reportData.content.alarm_offline }}</b><span>离线告警</span></div>
+                <div class="report-cell"><b>{{ reportData.content.alarms_unhandled }}</b><span>未处理告警</span></div>
                 <div class="report-cell"><b>{{ reportData.content.cmd_manual }}</b><span>手动指令</span></div>
                 <div class="report-cell"><b>{{ reportData.content.cmd_auto }}</b><span>自动指令</span></div>
+                <div class="report-cell"><b class="warn">{{ reportData.content.cmd_failed }}</b><span>指令失败</span></div>
             </div>
-            <div class="report-foot">日报日期：{{ reportData.report_date }}（前一日数据）· 每天 09:00 自动更新</div>
+            <div class="report-foot">日报日期：{{ reportData.report_date }}（前一日数据）· 每天 09:00 自动更新 · 告警以离线类为主</div>
         </template>
         <template v-else-if="reportEmpty">
             <div class="report-empty">
@@ -486,6 +496,7 @@ function handleLogout() {
 .report-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .report-cell { background: #F7F9FC; border-radius: 10px; padding: 12px; text-align: center; }
 .report-cell b { display: block; font-size: 22px; color: #2F6FED; }
+.report-cell b.warn { color: #E5484D; }
 .report-cell span { font-size: 12px; color: #6B7280; }
 .report-foot { margin-top: 14px; font-size: 12px; color: #9AA3AF; text-align: center; }
 .report-empty { padding: 28px 0 18px; text-align: center; }
