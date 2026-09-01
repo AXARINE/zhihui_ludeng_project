@@ -3,6 +3,24 @@
 > 本文档描述如何把智慧路灯系统部署起来:① 华为云 IoTDA 侧建实例/产品/设备/凭证,② 固件编译烧录到 BearPi-HM Nano 开发板,③ Rust 后端 + PostgreSQL 部署到本地(WSL)或云服务器,④ 全链路验收。
 > 系统已全链路验收,本文档按当前代码事实编写;接口清单见 `backend/README.md` §5(接口总览在 §5.2),功能愿景见 `智慧路灯_基本功能清单.md`。
 
+## 0. 快速开始(环境已就绪,5 分钟)
+
+> 适用:华为云实例/产品/设备/AK-SK 已建好(`backend/.env` 可用)。全新从零部署按 §2 → §7 顺序。
+
+```bash
+cd deploy && ./deploy.sh      # 一键起 前端+API+数据库(Caddy :80 单入口)
+# 首次运行生成 .env,填好必填项再跑一次;已有 backend/.env 就把 HUAWEI_*/IOTDA_* 抄进去
+# 复用历史数据加 PGDATA_VOLUME=streetlight-pgdata;回调鉴权加 IOTDA_WEBHOOK_TOKEN=<随机串> 后 docker compose up -d backend
+```
+
+- 与开发栈同占 8080,切发布栈前先 `docker compose -f backend/docker-compose.yml down`(数据卷保留);
+- 本机访问用 `http://127.0.0.1/`(用本机局域网 IP 自访会超时,WSL2 镜像模式怪癖);
+- 其他设备(同一 Wi-Fi/热点)访问 `http://<主机IP>/`;打不开是防火墙,管理员 PowerShell 放行:
+  `netsh advfirewall firewall add rule name=StreetLight-Web dir=in action=allow protocol=TCP localport=80,443 profile=any`
+- 手机热点/家用宽带**无公网入口**,公网访问需云服务器或内网穿透;局域网演示不受影响,也不必配 §3.5 数据转发(轮询 8s 已全功能)。
+
+验证:`curl http://127.0.0.1/api/health` → 200;控灯/设备在线验收见 §6。
+
 ## 1. 部署架构
 
 ```
@@ -87,6 +105,8 @@ Rust 后端(axum, 8080) --> PostgreSQL(Docker)
 1. 实例详情 → **数据转发** → 创建规则:转发内容勾选**设备属性变化**与**设备状态变化**,目标选 **HTTP 推送**,URL 填 `https://<公网域名>/api/iotda/callback`。
 2. **自定义 Header(鉴权,公网必配)**:加 `Authorization: Bearer <随机长字符串>`,与后端 `.env` 的 `IOTDA_WEBHOOK_TOKEN` 同值(`openssl rand -hex 32` 生成)。不配则回调接口不鉴权——知道路径即可伪造上报/离线告警,后端启动时会打 warn。
 3. 启用推送后把 `.env` 的 `IOTDA_POLL_INTERVAL_SECS` 设为 `60`(推送为主,轮询只兜底校准)。
+
+> 家用宽带/手机热点**无公网入口时不用建此规则**(推送需要后端公网可达,建了也推不进来);保持轮询(8s)+ 自动同步即可,功能无缺失。
 
 ## 4. 设备端固件部署
 
@@ -212,6 +232,8 @@ tar xzf streetlight-deploy-0.1.0.tar.gz && cd streetlight-deploy-0.1.0/
 部署包自带:Caddy(80/443 单入口,托管前端 `site/` 并反代 `/api`、`/docs`)、后端瘦镜像、PostgreSQL(默认不映射宿主端口)。`deploy.sh` 会拦截未填写的占位值,避免默认密钥上线。访问 `http://<服务器IP>/` 即前端;有域名时把 `Caddyfile` 里的 `:80` 换成域名即可自动申请 HTTPS。安全组只放行 80/443。
 
 > 开发栈 `backend/docker-compose.yml` 的 5432/8080 已默认只绑 127.0.0.1(局域网不可直达);对外一律走本节的 Caddy 入口。
+
+> 常用项:复用开发栈数据 → `deploy/.env` 加 `PGDATA_VOLUME=streetlight-pgdata`;回调鉴权 → 加 `IOTDA_WEBHOOK_TOKEN` 后 `docker compose up -d backend`;局域网打不开 → 防火墙放行 80/443(见 §0)。
 
 不想要容器化 Caddy、偏好宿主机 Caddy(apt)时,备选手工路径:
 
