@@ -100,6 +100,19 @@ ${DOMAIN:-:80} {
 }
 EOF
 
+# ---------- 3.5 前端产物兜底 ----------
+# site/ 是构建产物目录(不入库)。缺 index.html 时先摆占位页,免得 Caddy 对
+# 首页返回 404 / 白屏,让人以为部署失败——后端此时其实已经可用。
+mkdir -p site
+if [ ! -f site/index.html ]; then
+  if [ -f site-placeholder.html ]; then
+    cp site-placeholder.html site/index.html
+    echo "==> 注意:site/ 无前端产物,已摆占位页;构建前端请在仓库根跑 ./release.sh"
+  else
+    echo "==> 注意:site/ 无前端产物,首页将不可用(API 与 /docs 不受影响)"
+  fi
+fi
+
 # ---------- 4. 后端瘦镜像 ----------
 if ! docker image inspect streetlight-backend:latest >/dev/null 2>&1; then
   if [ -f images/streetlight-backend.tar ]; then

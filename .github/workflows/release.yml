@@ -100,7 +100,7 @@ jobs:
           BUNDLE="streetlight-deploy-${VERSION}"
           mkdir -p "$BUNDLE/images" "$BUNDLE/site"
           cp -r frontend_vue/dist/. "$BUNDLE/site/"
-          cp deploy/docker-compose.yml deploy/config.example.json deploy/deploy.sh "$BUNDLE/"
+          cp deploy/docker-compose.yml deploy/config.example.json deploy/deploy.sh deploy/site-placeholder.html "$BUNDLE/"
           chmod +x "$BUNDLE/deploy.sh"
           docker save streetlight-backend:latest -o "$BUNDLE/images/streetlight-backend.tar"
           tar -czf "${BUNDLE}.tar.gz" "$BUNDLE"

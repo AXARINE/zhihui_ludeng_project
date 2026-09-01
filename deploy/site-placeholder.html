@@ -1,0 +1,56 @@
+<!doctype html>
+<!--
+  占位页:deploy/site/ 里没有前端构建产物时,由 deploy.sh 复制成 site/index.html。
+  正式内容来自 frontend_vue 的构建产物(Release 部署包里已随包附带,
+  本仓库内则由仓库根 ./release.sh 同步进 deploy/site/)。
+-->
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>启晖智慧路灯管理系统 — 前端尚未构建</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #f7f9fc;
+        color: #1f2937;
+        font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      }
+      .card {
+        max-width: 560px;
+        padding: 32px 36px;
+        background: #fff;
+        border-radius: 14px;
+        box-shadow: 0 8px 30px rgb(0 0 0 / 8%);
+      }
+      h1 { margin: 0 0 8px; font-size: 20px; }
+      p { margin: 0 0 16px; color: #6b7280; font-size: 14px; line-height: 1.7; }
+      code {
+        display: block;
+        margin: 6px 0;
+        padding: 10px 12px;
+        background: #f3f4f6;
+        border-radius: 8px;
+        font-size: 13px;
+      }
+      .ok { color: #2f6fed; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>前端尚未构建</h1>
+      <p>
+        后端与数据库已经起来了(<span class="ok">/api/health</span> 可直接访问),
+        只是 <code>deploy/site/</code> 里还没有前端静态产物。
+      </p>
+      <p>本仓库内构建并部署:</p>
+      <code>./release.sh</code>
+      <p>或者直接用 GitHub Release 的部署包(已附带前端产物):</p>
+      <code>tar xzf streetlight-deploy-*.tar.gz &amp;&amp; cd streetlight-deploy-*/ &amp;&amp; ./deploy.sh</code>
+    </div>
+  </body>
+</html>

@@ -30,14 +30,15 @@ frontend_vue/vite-dev.pid
 node-win-x64/
 
 # 发布部署包(deploy/):镜像 tar 与前端产物由 CI/本地构建生成,不入库;
-# site/ 只保留占位页,正式部署包由 CI 用 frontend_vue/dist 覆盖;
+# site/ 整个不入库——它装的是带哈希文件名的构建产物,曾经只跟踪 index.html,
+# 结果 git 里的 index.html 引用着没入库的 assets,新克隆部署即白屏;
+# 现由 deploy.sh 在 site/ 为空时填入 site-placeholder.html 兜底;
 # .env/Caddyfile 由 deploy.sh 根据 config.json 生成,config.json 含真实凭据不入库
 deploy/.env
 deploy/config.json
 deploy/Caddyfile
 deploy/images/
-deploy/site/*
-!deploy/site/index.html
+deploy/site/
 
 # 测试数据工具(tools/db-seeder)的 uv 虚拟环境与 Python 缓存
 tools/db-seeder/.venv/
