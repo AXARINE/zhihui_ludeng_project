@@ -130,6 +130,7 @@ tar xzf streetlight-deploy-*.tar.gz && cd streetlight-deploy-*/
 | `iotda_webhook_token` | 公网必填 | 数据转发推送鉴权 token(§3.5) |
 | `iotda_poll_interval_secs` | | 影子轮询秒数,默认 8;启用推送后建议 60 |
 | `iotda_auto_sync_devices` | | `true` = 华为云设备列表自动注册入库(只增不删,见 5.2) |
+| `iotda_sync_interval_secs` | | 设备自动同步间隔秒数,默认 1800(30 分钟);演示/频繁增删设备时可设 60 |
 | `postgres_password` | | 数据库密码,默认 `streetlight` |
 | `pgdata_volume` | | 复用已有数据卷名(默认 `streetlight-deploy-pgdata`) |
 | `allowed_origins` | | 前后端不同域时填前端域名(逗号分隔);同域 Caddy 托管无需配置 |

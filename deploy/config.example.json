@@ -14,6 +14,7 @@
   "iotda_webhook_token": "",
   "iotda_poll_interval_secs": "",
   "iotda_auto_sync_devices": "",
+  "iotda_sync_interval_secs": "",
 
   "postgres_password": "",
   "pgdata_volume": "",
