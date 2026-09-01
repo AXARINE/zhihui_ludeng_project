@@ -76,7 +76,7 @@ cp .env.example .env          # 填写华为云 AK/SK、项目 ID、实例应用
 - Windows 侧替代入口：PowerShell 用 `backend/start.ps1`，Git Bash 用仓库根 `run.sh`。
 - Swagger UI：`http://127.0.0.1:8080/docs`——先 `POST /api/auth/login` 拿 token，右上角 Authorize 填 `Bearer <token>` 即可在线调试。
 
-**发布版一键部署（发给别人 / 服务器，推荐）**：打 tag 后 GitHub Actions 自动产出部署包 `streetlight-deploy-<版本>.tar.gz`（后端瘦镜像 + 前端 + Caddy 入口），对方只需：解包 → 填 `.env` → `./deploy.sh`。详见 [backend/README.md §10.4](backend/README.md) 与 [华为云IoTDA部署文档.md §5.4](华为云IoTDA部署文档.md)。
+**发布版一键部署（发给别人 / 服务器，推荐）**：打 tag 后 GitHub Actions 自动产出部署包 `streetlight-deploy-<版本>.tar.gz`（后端瘦镜像 + 前端 + Caddy 入口），对方只需：解包 → `./deploy.sh` 生成 `config.json` 并填写 → 再跑 `./deploy.sh`。详见 [backend/README.md §10.4](backend/README.md) 与 [华为云IoTDA部署文档.md §5.1](华为云IoTDA部署文档.md)。
 
 ### 3. 启动前端
 
@@ -210,7 +210,7 @@ A: 产品模型 `Threshold` 必须勾选**可读可写**，只读属性不支持
 A: 执行 `source ~/.cargo/env` 或重新打开 WSL 终端。
 
 **Q: 想让同学/老师在自己电脑或服务器上一键部署？**
-A: 用发布部署包：GitHub Release 下载 `streetlight-deploy-*.tar.gz`（或仓库 `deploy/` 目录），解包 → 填 `.env` → `./deploy.sh`（详见部署文档 §5.4）。
+A: 用发布部署包：GitHub Release 下载 `streetlight-deploy-*.tar.gz`（或仓库 `deploy/` 目录），解包 → `./deploy.sh` 生成 `config.json` 并填写 → 再跑 `./deploy.sh`（详见部署文档 §5.1）。
 
 **Q: 固件编译报 symlink / 权限错误**
 A: 在 WSL2 里跑 `./build.sh`（勿在 Windows 侧直接执行）；`bearpi-hm_nano` 是 submodule，首次需 `git submodule update --init`。

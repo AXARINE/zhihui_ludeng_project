@@ -1,8 +1,9 @@
 # 发布部署包:打 tag(v*)自动构建后端瘦镜像 + 前端 dist,组装成一键部署包挂到 GitHub Release
 #
-# 部署包内容:docker-compose.yml、Caddyfile、deploy.sh、.env.example、
+# 部署包内容:docker-compose.yml、deploy.sh、config.example.json、
 #             site/(前端静态产物)、images/streetlight-backend.tar(瘦镜像)
-# 使用者:tar xzf 部署包 → 填 .env → ./deploy.sh(docker load + compose up -d)
+# 使用者:tar xzf 部署包 → ./deploy.sh 生成 config.json → 填写 → 再跑 ./deploy.sh
+#        (config.json → 自动生成 .env + Caddyfile → docker load + compose up -d)
 name: Release 部署包
 
 on:
@@ -40,8 +41,7 @@ jobs:
           BUNDLE="streetlight-deploy-${VERSION}"
           mkdir -p "$BUNDLE/images" "$BUNDLE/site"
           cp -r frontend_vue/dist/. "$BUNDLE/site/"
-          cp deploy/docker-compose.yml deploy/Caddyfile deploy/deploy.sh "$BUNDLE/"
-          cp backend/.env.example "$BUNDLE/.env.example"
+          cp deploy/docker-compose.yml deploy/config.example.json deploy/deploy.sh "$BUNDLE/"
           chmod +x "$BUNDLE/deploy.sh"
           docker save streetlight-backend:latest -o "$BUNDLE/images/streetlight-backend.tar"
           tar -czf "${BUNDLE}.tar.gz" "$BUNDLE"

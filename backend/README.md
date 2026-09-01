@@ -818,9 +818,9 @@ cd backend
 面向“发给别人 / 服务器从零一键部署”的场景，由 `../deploy/` 目录 + GitHub Actions 自动出包：
 
 - 打 tag（`git tag v0.1.0 && git push origin v0.1.0`）触发 `.github/workflows/release.yml`：构建前端 dist → 构建后端瘦镜像 → 组装 `streetlight-deploy-<版本>.tar.gz` → 挂到 GitHub Release。
-- 部署包内容：`docker-compose.yml`（postgres + backend + caddy）、`Caddyfile`、`deploy.sh`、`.env.example`、`site/`（前端产物）、`images/streetlight-backend.tar`（瘦镜像）。
-- 使用者三步：解包 → 填 `.env` → `./deploy.sh`（自动 `docker load` + `compose up -d`）；`deploy.sh` 会拦截未填写的占位值（AK/SK/endpoint/JWT_SECRET），避免带默认密钥上线。
-- 端口策略：对外只有 Caddy 80/443；后端 8080 只绑 127.0.0.1；数据库默认不映射宿主端口。数据卷默认 `streetlight-deploy-pgdata`，想复用开发栈历史数据就在 `.env` 设 `PGDATA_VOLUME=streetlight-pgdata`。
+- 部署包内容：`docker-compose.yml`（postgres + backend + caddy）、`deploy.sh`、`config.example.json`、`site/`（前端产物）、`images/streetlight-backend.tar`（瘦镜像）。
+- 使用者三步：解包 → `./deploy.sh` 生成 `config.json` 并填写 → 再跑 `./deploy.sh`（从 config.json 生成 `.env` 与 `Caddyfile`，必填项缺失即拦截，然后 `docker load` + `compose up -d`）。`config.json` 键说明见部署文档 §5.1。
+- 端口策略：对外只有 Caddy 80/443（`domain` 填域名自动 HTTPS）；后端 8080 只绑 127.0.0.1；数据库默认不映射宿主端口。数据卷默认 `streetlight-deploy-pgdata`，复用开发栈历史数据就在 `config.json` 设 `pgdata_volume=streetlight-pgdata`。
 
 ---
 
