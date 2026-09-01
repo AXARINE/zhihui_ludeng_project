@@ -27,7 +27,7 @@ struct AiCfg {
 fn ai_cfg() -> Option<AiCfg> {
     let key = std::env::var("AI_API_KEY")
         .ok()
-        .filter(|k| !k.trim().is_empty() && !k.contains("这里"))?;
+        .filter(|k| !k.trim().is_empty())?;
     Some(AiCfg {
         key,
         base: std::env::var("AI_BASE_URL")
@@ -40,7 +40,6 @@ fn ai_cfg() -> Option<AiCfg> {
 static HTTP: LazyLock<reqwest::Client> = LazyLock::new(reqwest::Client::new);
 
 /// 问答结果：text 是给人看的回答，devices 供前端生成"锁定设备"跳转标签
-#[derive(Default)]
 pub struct Answer {
     pub text: String,
     pub devices: Vec<String>,
@@ -277,7 +276,7 @@ fn collect_ids(rows: &[AlarmRow]) -> Vec<String> {
 }
 
 /// 主流程：配了 AI_API_KEY 走大模型生成，否则纯本地关键词问答。
-/// AI 失败自动回退本地回答，问答接口永不报错。
+/// AI 失败自动回退本地回答（AI 层永不报错）；数据库错误仍正常上抛。
 pub async fn answer(
     pool: &PgPool,
     question: &str,
@@ -315,7 +314,7 @@ async fn ai_answer(
     devices_txt: &str,
     alarms_txt: &str,
     local_txt: &str,
-) -> Result<String, Box<dyn std::error::Error>> {
+) -> anyhow::Result<String> {
     let sys = "你是智慧路灯管理平台的维护助手，面向管理员。请依据给出的平台真实数据回答，\
                不要编造数据里没有的设备或告警；用中文纯文本（不要 Markdown 符号），\
                简洁分点；涉及故障时给出调修建议，并点名相关设备编号方便管理员定位。";
@@ -348,7 +347,7 @@ async fn ai_answer(
         .trim()
         .to_string();
     if text.is_empty() {
-        return Err("AI 返回为空".into());
+        anyhow::bail!("AI 返回为空");
     }
     Ok(text)
 }
@@ -361,7 +360,8 @@ async fn answer_local(
 ) -> Result<Answer, sqlx::Error> {
     let intent = classify_intent(question);
     let device_id = resolve_device(pool, question).await?;
-    let locked = device_id.clone().map_or_else(Vec::new, |d| vec![d]);
+    // Option 即迭代器(idiom 1.10):Some(id) → [id],None → []
+    let locked: Vec<String> = device_id.clone().into_iter().collect();
     let scope = device_id
         .as_deref()
         .map_or_else(|| "全部设备".to_string(), |d| format!("设备 {d}"));
