@@ -188,12 +188,12 @@ function handleLogout() {
                     <span>审计日志</span>
                 </el-menu-item>
 
-                <!-- 阈值配置 — 需要 config:threshold 权限 -->
-                <el-menu-item v-if="hasPerm('config:threshold')" index="/config">
+                <!-- 参数配置 — 需要 config:threshold 或 config:dimming 权限 -->
+                <el-menu-item v-if="hasPerm('config:threshold') || hasPerm('config:dimming')" index="/config">
                     <el-icon>
                         <Setting />
                     </el-icon>
-                    <span>阈值配置</span>
+                    <span>参数配置</span>
                 </el-menu-item>
 
                 <!-- 智能问答 — 需要 assistant:qa 权限 -->

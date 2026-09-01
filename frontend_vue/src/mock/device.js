@@ -106,6 +106,17 @@ export const mockThresholdConfig = {
 }
 
 // ============================================
+// 调光配置（符合后端 GET /api/devices/{id}/dimming 响应格式）
+// ============================================
+// 【注意】后端格式：{device_id, brightness, dim_curve}
+// dim_curve 为 "lux:pct,lux:pct,..."（≤4 点，lux 严格递增），空串 = 未启用曲线
+export const mockDimmingConfig = {
+  device_id: 'dev-001',
+  brightness: 100,
+  dim_curve: '0:100,300:20,1000:0'
+}
+
+// ============================================
 // 地图点位（符合后端 /api/map/devices 响应格式）
 // ============================================
 // 【注意】后端坐标是 WGS84，状态/灯态/模式是小写

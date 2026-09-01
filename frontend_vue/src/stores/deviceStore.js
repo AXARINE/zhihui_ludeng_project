@@ -23,6 +23,8 @@ import {
   controlLamp,
   getThreshold,
   setThreshold,
+  getDimming,
+  setDimming,
   getAlarmList,
   getLatestLux,
   getLuxHistory
@@ -33,6 +35,7 @@ import {
   mockDeviceList,
   mockAlarmList,
   mockThresholdConfig,
+  mockDimmingConfig,
   mockResponse
 } from '@/mock/device'
 
@@ -103,6 +106,15 @@ export const useDeviceStore = defineStore('device', {
     thresholdConfig: {
       threshold: 40.0
     },
+
+    // 调光配置（手动亮度 + 照度-亮度曲线）
+    dimmingConfig: {
+      brightness: 100,
+      dim_curve: ''
+    },
+
+    // 演示灯的调光配置（键 = 设备 ID；演示灯不调后端，本地保存）
+    demoDimming: {},
 
     // 加载状态
     loading: false,
@@ -342,6 +354,73 @@ export const useDeviceStore = defineStore('device', {
       } catch (error) {
         console.log('保存失败：', error)
         return { success: false, message: '保存失败' }
+      }
+    },
+
+    // ============================================
+    // 获取调光配置（手动亮度 + 照度-亮度曲线）
+    // ============================================
+    async fetchDimmingConfig(deviceId) {
+      this.loading = true
+      try {
+        let res
+
+        if (USE_MOCK) {
+          // 【开发阶段】使用 Mock 数据
+          console.log('使用 Mock 调光配置')
+          res = await mockResponse(mockDimmingConfig)
+        } else {
+          // 【生产阶段】调用后端接口
+          res = await getDimming(deviceId)
+        }
+
+        this.dimmingConfig = {
+          brightness: res?.brightness ?? 100,
+          dim_curve: res?.dim_curve ?? ''
+        }
+        console.log('调光配置加载成功：', this.dimmingConfig)
+      } catch (error) {
+        console.log('调光配置加载失败：', error)
+      } finally {
+        this.loading = false
+      }
+    },
+
+    // ============================================
+    // 保存调光配置（亮度 / 曲线，至少一项）
+    // ============================================
+    async saveDimmingConfig(deviceId, data) {
+      try {
+        console.log('保存调光配置：', deviceId, data)
+
+        // 演示灯：本地模拟（不调后端，避免 404），按设备分别记录
+        const demoDev = this.demoDevices.find(d => d.id === deviceId)
+        if (demoDev) {
+          const cur = this.demoDimming[deviceId] || {}
+          if (data.brightness != null) cur.brightness = data.brightness
+          if (data.dim_curve != null) cur.dim_curve = data.dim_curve
+          this.demoDimming[deviceId] = cur
+          this.dimmingConfig = { brightness: cur.brightness ?? 100, dim_curve: cur.dim_curve ?? '' }
+          return { success: true, message: '演示灯调光配置已保存（本地模拟）' }
+        }
+
+        if (USE_MOCK) {
+          // 【开发阶段】模拟保存成功
+          await mockResponse({ success: true })
+        } else {
+          // 【生产阶段】调用后端接口
+          await setDimming(deviceId, data)
+        }
+
+        // 更新本地数据
+        if (data.brightness != null) this.dimmingConfig.brightness = data.brightness
+        if (data.dim_curve != null) this.dimmingConfig.dim_curve = data.dim_curve
+
+        return { success: true, message: '保存成功' }
+      } catch (error) {
+        console.log('保存调光配置失败：', error)
+        const detail = error?.response?.data
+        return { success: false, message: typeof detail === 'string' ? detail : '保存失败' }
       }
     },
 

@@ -209,6 +209,35 @@ export function setThreshold(deviceId, threshold) {
 }
 
 // ============================================
+// 8b. 获取调光配置（手动亮度 + 照度-亮度曲线）
+// GET /api/devices/{id}/dimming
+// ============================================
+export function getDimming(deviceId) {
+  return request({
+    url: `/devices/${deviceId}/dimming`,
+    method: 'get'
+  })
+  // 返回格式：{ device_id, brightness, dim_curve }
+}
+
+// ============================================
+// 8c. 设置调光配置
+// PUT /api/devices/{id}/dimming
+// ============================================
+export function setDimming(deviceId, data) {
+  return request({
+    url: `/devices/${deviceId}/dimming`,
+    method: 'put',
+    data
+  })
+  // data 的格式（至少提供一个字段）：
+  // {
+  //   brightness: 60,               // 可选，手动亮度 0~100
+  //   dim_curve: '0:100,300:20'     // 可选，亮度曲线串（空串=停用曲线）
+  // }
+}
+
+// ============================================
 // 9. 获取告警列表
 // GET /api/alarms?device_id=&resolved=
 // ============================================

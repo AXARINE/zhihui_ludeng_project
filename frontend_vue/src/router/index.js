@@ -54,7 +54,7 @@ const routes = [
     path: '/config',
     name: 'ThresholdConfig',
     component: () => import('@/pages/ThresholdConfig.vue'),
-    meta: { title: '阈值配置' }
+    meta: { title: '参数配置' }
   },
 
   {
