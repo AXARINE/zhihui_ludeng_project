@@ -66,13 +66,13 @@ cp .env.example .env          # 填写华为云 AK/SK、项目 ID、实例应用
 或一键容器化部署（本地 / 云服务器通用）：
 
 ```bash
-./dev.sh up                   # docker compose up -d --build（postgres + backend + nocodb）
+./dev.sh up                   # docker compose up -d --build（postgres + backend）
 ```
 
 - 首次启动自动执行 `migrations/` 建表，并按角色**补建引导账号**（该角色已有账号则跳过）：
   - `superadmin` / `superadmin123`（系统管理员，可用 `BOOTSTRAP_SUPER_ADMIN_USERNAME/PASSWORD` 覆盖）
   - `admin` / `admin123`（路灯管理员，可用 `BOOTSTRAP_ADMIN_USERNAME/PASSWORD` 覆盖）
-- 生产环境**必须**覆盖全部引导账号默认值与 `JWT_SECRET`；云部署建议删除 postgres/nocodb 的端口映射，安全组只放行 8080。
+- 生产环境**必须**覆盖全部引导账号默认值与 `JWT_SECRET`；云部署建议删除 postgres 的端口映射，安全组只放行 8080。
 - Windows 侧替代入口：PowerShell 用 `backend/start.ps1`，Git Bash 用仓库根 `run.sh`。
 - Swagger UI：`http://127.0.0.1:8080/docs`——先 `POST /api/auth/login` 拿 token，右上角 Authorize 填 `Bearer <token>` 即可在线调试。
 
@@ -131,7 +131,7 @@ IoTDA 实例**设备侧**域名（`CONFIG_APP_SERVERIP`）在 `e53_sc1_example.c
 │   ├── src/                   # main/api/auth/iothub/assistant/openapi/webhook + tests
 │   ├── migrations/            # 0001~0005：业务表/RBAC/知识库/super_admin/审计
 │   ├── dev.sh                 # 统一入口：db/run/up/down/update/logs/status/help
-│   ├── docker-compose.yml     # postgres + backend + nocodb 一键部署
+│   ├── docker-compose.yml     # postgres + backend 一键部署
 │   └── README.md              # 后端详细文档（架构/API/RBAC/部署/规范）
 ├── frontend_vue/              # Vue3 前端（Element Plus + ECharts + Pinia）
 ├── build.sh                   # 固件编译：同步源码 + Docker 编译 + compile_commands.json

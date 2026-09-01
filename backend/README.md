@@ -49,7 +49,7 @@ backend/
 ├── rustfmt.toml              # 格式化配置：max_width = 80
 ├── .env.example              # 环境变量模板（复制为 .env 后填写，.env 不入库）
 ├── Dockerfile                # 多阶段构建镜像
-├── docker-compose.yml        # PostgreSQL + 后端 + nocodb 一键部署
+├── docker-compose.yml        # PostgreSQL + 后端 一键部署
 ├── dev.sh                    # 统一入口：db/run/up/down/update/logs/status（见 §3.2/3.3）
 ├── migrations/
 │   ├── 0001_init.sql         # 业务表：device/lux_record/config/alarm/command_record
@@ -114,15 +114,14 @@ docker compose up -d --build
 # 或统一入口: ./dev.sh up
 ```
 
-启动三个容器：
+启动两个容器：
 
 | 服务 | 端口 | 说明 |
 |---|---|---|
 | `postgres` | 5432 | 数据卷 `streetlight-pgdata`，历史数据不丢 |
 | `backend` | 8080 | 读取 `.env`，`DATABASE_URL` 被 compose 覆盖为内部服务名 `postgres` |
-| `nocodb` | 8081 | 可选，电子表格式看数据用；云部署可删除 |
 
-云服务器部署：同一份 compose 文件 + 填好的 `.env` 即可；建议删除 postgres 的 `5432:5432` 与 nocodb 端口映射，只放行 8080。云上更新代码用 `./dev.sh update`（见 §10.3）。
+云服务器部署：同一份 compose 文件 + 填好的 `.env` 即可；建议删除 postgres 的 `5432:5432` 端口映射，只放行 8080。云上更新代码用 `./dev.sh update`（见 §10.3）。
 
 ### 3.4 快速验证
 
@@ -801,7 +800,7 @@ cargo build
 
 - `postgres` 带 healthcheck，`backend` 等 `service_healthy` 后启动，`restart: unless-stopped`。
 - 数据卷 `pgdata` 用固定名称 `streetlight-pgdata` 复用历史数据。
-- 云部署建议删除 postgres/nocodb 的端口映射，仅保留 8080。
+- 云部署建议删除 postgres 的端口映射，仅保留 8080。
 
 ### 10.3 云上更新后端（dev.sh update）
 

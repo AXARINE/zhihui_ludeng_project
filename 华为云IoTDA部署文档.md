@@ -179,7 +179,6 @@ cd zhihui_ludeng_project/backend
 cp .env.example .env && vim .env
 
 # 3) 裁剪 compose(生产)
-#    - 删除 nocodb 整个服务(仅本地看数据用);
 #    - 删除 postgres 的 ports: "5432:5432" 映射,数据库绝不对外;
 #    - 后端保留 8080:8080,后续由反向代理收敛到 443。
 

@@ -47,21 +47,6 @@ services:
       postgres:
         condition: service_healthy
     restart: unless-stopped
-
-  # 电子表格式数据查看(Airtable 风格,主要看数据用):
-  # 浏览器打开 http://localhost:8081,首次注册一个本地账号,
-  # 然后 Connect to external database -> PostgreSQL ->
-  # host=postgres user/password/database=streetlight
-  nocodb:
-    image: nocodb/nocodb:latest
-    container_name: streetlight-nocodb
-    ports:
-      - "8081:8080" # 云部署时删除本服务
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: unless-stopped
-
 volumes:
   pgdata:
     name: streetlight-pgdata

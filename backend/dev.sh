@@ -21,7 +21,7 @@ usage() {
 
   db      只启动本地 PostgreSQL(docker compose up -d postgres)
   run     source .env 后 cargo run(本地开发,监听 8080)
-  up      docker compose up -d --build(postgres + backend + nocodb)
+  up      docker compose up -d --build(postgres + backend)
   down    docker compose down(停容器,数据卷 streetlight-pgdata 保留)
   update  git pull --ff-only + 重建 backend 容器 + 健康检查
   logs    docker compose logs -f --tail 100(如: ./dev.sh logs backend)
