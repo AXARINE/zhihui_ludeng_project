@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="启晖智慧路灯">
+  <title>启晖智慧路灯</title>
+  <!--
+    启晖智慧路灯 · 标志（无底版）
+    透明背景 + 浅赤陶结构，专为深色侧边栏（#1C1B1A）设计。
+    若要放到浅色背景上，把 #E8A587 换成 #C96A4A、#FFF3E0 换成 #F6C68A。
+  -->
+  <defs>
+    <radialGradient id="halo">
+      <stop offset="0"   stop-color="#FFDDAE" stop-opacity=".55"/>
+      <stop offset=".45" stop-color="#E8975F" stop-opacity=".19"/>
+      <stop offset="1"   stop-color="#E8975F" stop-opacity="0"/>
+    </radialGradient>
+    <clipPath id="under"><rect x="0" y="17.4" width="64" height="47"/></clipPath>
+  </defs>
+
+  <g transform="translate(-4.1,-4.9) scale(1.1)">
+    <g clip-path="url(#under)">
+      <ellipse cx="23.2" cy="18" rx="21" ry="21" fill="url(#halo)"/>
+    </g>
+    <path d="M31.5 14.3 C40.5 14.3 46 19 46 26.5 V53.5"
+          fill="none" stroke="#E8A587" stroke-width="3.6" stroke-linecap="round"/>
+    <rect x="40.4" y="52" width="11.2" height="3.6" rx="1.8" fill="#E8A587"/>
+    <path d="M15.2 12.4 H31.2 L29.4 16.6 H17 Z"
+          fill="#E8A587" stroke="#E8A587" stroke-width="2.2" stroke-linejoin="round"/>
+    <ellipse cx="23.2" cy="17.4" rx="5.6" ry="1.5" fill="#FFF3E0"/>
+  </g>
+</svg>

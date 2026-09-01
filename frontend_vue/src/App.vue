@@ -18,6 +18,7 @@ import {
     Monitor, List, Bell, Setting, Document,
     User, ChatDotRound, Lock, UserFilled, MapLocation
 } from '@element-plus/icons-vue'
+import logoMark from './assets/logo.svg'
 
 const router = useRouter()
 const route = useRoute()
@@ -154,6 +155,7 @@ function handleLogout() {
     <div v-else class="app-container">
         <aside class="sidebar">
             <div class="logo">
+                <img class="logo-mark" :src="logoMark" alt="" />
                 <h2>启晖智慧路灯</h2>
                 <p>IoT 管理系统</p>
             </div>
@@ -337,6 +339,14 @@ function handleLogout() {
     padding: 22px 20px 18px;
     text-align: center;
     border-bottom: 1px solid #2a2825;
+}
+
+/* 侧栏标志：赤陶路灯（src/assets/logo.svg） */
+.logo-mark {
+    display: block;
+    width: 34px;
+    height: 34px;
+    margin: 0 auto 9px;
 }
 
 
