@@ -272,7 +272,7 @@ async fn notify_report(
         db,
         "每日日报",
         &format!(
-            "{} 设备 {} 台(在线 {} · 在线率 {}%),\
+            "{} 设备 {} 台(当前在线 {} · 当日在线率 {}%),\
              告警 {} 条(离线 {}),平均光照 {:.0} lux,手动指令 {} 次(失败 {})",
             content.date,
             content.devices_total,
