@@ -1,15 +1,18 @@
 #!/usr/bin/env bash
 # ============================================================
-# 智慧路灯"发新版"一键流水线(本机 WSL,面向 deploy/ 发布栈)
+# 智慧路灯"本机发新版"流水线(面向 deploy/ 发布栈)
 #
 #   ./release.sh                  质量门禁 → 构建 → 部署 → 冒烟验证
-#   ./release.sh --tag v0.2.0     上述全流程 + 打 tag 并推送(触发 CI 出 Release 包)
 #   ./release.sh --no-deploy      只构建 + 校验产物,不动线上容器
 #   ./release.sh --skip-tests     跳过测试门禁(应急用,不建议)
 #   ./release.sh help             本帮助
 #
-# 流程与 .github/workflows/release.yml 保持一致(同样的 npm build + docker build),
-# 差别有两处:本脚本额外跑测试门禁,并把产物真正部署到本机 deploy/ 栈做冒烟验证。
+# 与 CI 的分工:
+#   - 本脚本:把改动落到**本机** deploy/ 栈(构建镜像 + 前端 + 部署 + 冒烟)。
+#   - CI(.github/workflows/release.yml):push 到 master 后自动定版、打 tag、
+#     产出 Release 部署包供他人下载。版本号由 CI 递增,本脚本不打 tag。
+#   两者步骤一致(同样的 cargo test + npm build + docker build),本机验过再 push,
+#   CI 基本不会翻车。
 #
 # 手工等价步骤(本脚本就是把它们串起来):
 #   cd backend && cargo test && docker build -t streetlight-backend:latest .
@@ -22,16 +25,16 @@ cd "$(dirname "$0")"
 ROOT="$PWD"
 DO_DEPLOY=1
 DO_TESTS=1
-TAG=""
+TOTAL=6
 
 usage() {
-  sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'
+  # 打印文件头注释块(到闭合的 ==== 行为止),改动 header 无需同步行号
+  sed -n '2,/^# ===/p' "$0" | sed 's/^# \{0,1\}//'
   exit 0
 }
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --tag) TAG="${2:-}"; [ -n "$TAG" ] || { echo "==> --tag 需要版本号,如 --tag v0.2.0" >&2; exit 1; }; shift 2 ;;
     --no-deploy) DO_DEPLOY=0; shift ;;
     --skip-tests) DO_TESTS=0; shift ;;
     help|-h|--help) usage ;;
@@ -40,8 +43,6 @@ while [ $# -gt 0 ]; do
 done
 
 step() { echo; echo "==> [$1/$TOTAL] $2"; }
-TOTAL=6
-[ -n "$TAG" ] && TOTAL=7
 
 # ---------- 0. 前置检查:缺什么早报错,别构建到一半才失败 ----------
 for bin in docker npm cargo; do
@@ -49,12 +50,6 @@ for bin in docker npm cargo; do
 done
 if [ "$DO_DEPLOY" = 1 ] && [ ! -f deploy/config.json ]; then
   echo "==> deploy/config.json 不存在;先 cd deploy && ./deploy.sh 生成并填写" >&2
-  exit 1
-fi
-# 打 tag 要求工作区干净,否则 tag 指向的提交与实际发布产物对不上
-if [ -n "$TAG" ] && [ -n "$(git status --porcelain)" ]; then
-  echo "==> 工作区有未提交改动,--tag 会让 tag 与产物不一致;先提交再发版" >&2
-  git status --short >&2
   exit 1
 fi
 
@@ -117,15 +112,8 @@ else
   echo "    已跳过(--no-deploy)"
 fi
 
-# ---------- 7. 打 tag 发版(触发 CI 产出 Release 部署包) ----------
-if [ -n "$TAG" ]; then
-  step 7 "打 tag 并推送:$TAG"
-  git tag -a "$TAG" -m "Release $TAG"
-  git push origin "$TAG"
-  echo "    已推送;CI 将构建部署包并挂到 GitHub Release"
-fi
-
 echo
-echo "==> 发布完成"
+echo "==> 本机发布完成"
 [ "$DO_DEPLOY" = 1 ] && echo "    入口:http://127.0.0.1/   Swagger:http://127.0.0.1/docs"
+echo "    push 到 master 后,CI 会自动定版打 tag 并产出 Release 部署包"
 exit 0

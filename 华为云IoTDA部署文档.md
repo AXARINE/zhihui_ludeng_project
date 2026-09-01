@@ -107,7 +107,7 @@ cp C3_e53_sc1_pls/include/app_config.example.h C3_e53_sc1_pls/include/app_config
 
 ### 5.1 发布部署包(config.json 一键部署,推荐)
 
-适合"发给别人 / 服务器从零部署"。打 tag(`git tag v* && git push origin v*`)后 CI 自动产出 `streetlight-deploy-<版本>.tar.gz` 挂到 GitHub Release。
+适合"发给别人 / 服务器从零部署"。**push 到 master 即自动发版**:CI 跑测试 → 构建 → 按最新 tag 补丁号 +1 自动定版打 tag → 产出 `streetlight-deploy-<版本>.tar.gz` 挂到 GitHub Release(纯文档/固件/工具改动不触发)。需要指定版本号时,在 Actions 页手动运行工作流并填 `version`。
 
 ```bash
 tar xzf streetlight-deploy-*.tar.gz && cd streetlight-deploy-*/
@@ -199,5 +199,6 @@ cp .env.example .env && vim .env   # 变量与 config.json 键一一对应,完�
 
 - 固件:改 `C3_e53_sc1_pls/`(权威副本,勿改 submodule 树)→ `./build.sh` → `./flash.sh 4` → RESET ×2 → 串口验证;
 - 后端:改 `backend/src/` → `cargo build` → curl 验证;新接口必须补 `#[utoipa::path]` 注解并登记进 `openapi.rs`;
-- 前端:改 `frontend_vue/src/` → `npm run build`,发布走打 tag 出部署包;
+- 前端:改 `frontend_vue/src/` → `npm run build` 自测;
+- **发版**:本机整套走仓库根 `./release.sh`(测试 → 构建前后端 → 部署到本机 deploy/ 栈 → 冒烟验证),验过再 push;push 到 master 后 CI 自动定版出 Release 部署包(§5.1);
 - 数据库 schema:**上线后必须新建递增迁移**,不再原地改旧文件。

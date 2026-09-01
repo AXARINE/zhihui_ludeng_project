@@ -1,25 +1,50 @@
-# 发布部署包:打 tag(v*)自动构建后端瘦镜像 + 前端 dist,组装成一键部署包挂到 GitHub Release
+# 发新版:push 到 master 即自动定版 —— 跑测试 → 构建前端/后端镜像 → 自动打 tag → 组装部署包挂 Release
+#
+# 触发:
+#   - push 到 master(忽略纯文档/固件/工具改动,这些不影响部署包)
+#   - 手动运行(workflow_dispatch),可指定版本号覆盖自动递增
+#
+# 版本号:取现有最大 v 标签的补丁号 +1(无标签则 v0.1.0);tag 在构建全部成功后才创建,
+#        构建失败不会白白消耗版本号。工作流用 GITHUB_TOKEN 推 tag,GitHub 不会因此
+#        再触发一次本工作流(官方的递归保护),所以不会自我循环。
 #
 # 部署包内容:docker-compose.yml、deploy.sh、config.example.json、
 #             site/(前端静态产物)、images/streetlight-backend.tar(瘦镜像)
 # 使用者:tar xzf 部署包 → ./deploy.sh 生成 config.json → 填写 → 再跑 ./deploy.sh
-#        (config.json → 自动生成 .env + Caddyfile → docker load + compose up -d)
 name: Release 部署包
 
 on:
   push:
-    tags: ["v*"]
+    branches: [master]
+    paths-ignore:
+      - "**.md"
+      - "C3_e53_sc1_pls/**"
+      - "tools/**"
+      - ".gitignore"
+      - ".clangd"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "指定版本号(如 v0.3.0);留空 = 自动补丁号 +1"
+        required: false
 
 permissions:
   contents: write
+
+concurrency:
+  # 连续 push 时只发最后一版,避免并行跑出两个版本号
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # 需要完整历史与标签来计算下一个版本号
 
-      # 质量门禁放在最前:测试挂了就别浪费时间构建,更别把坏版本挂上 Release
+      # 质量门禁放最前:测试挂了就别浪费时间构建,更别把坏版本挂上 Release
       - name: 质量门禁(cargo test)
         uses: Swatinem/rust-cache@v2
         with:
@@ -41,10 +66,37 @@ jobs:
         # 境外 runner 直连 crates.io 更快,故关闭 rsproxy 镜像
         run: docker build -t streetlight-backend:latest --build-arg USE_RS_PROXY=0 backend/
 
+      - name: 计算版本号
+        id: ver
+        run: |
+          set -euo pipefail
+          INPUT="${{ inputs.version }}"
+          if [ -n "$INPUT" ]; then
+            TAG="$INPUT"
+            case "$TAG" in v*) ;; *) TAG="v$TAG" ;; esac
+          else
+            git fetch --tags --force --quiet
+            LATEST="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)"
+            if [ -z "$LATEST" ]; then
+              TAG="v0.1.0"
+            else
+              IFS=. read -r MAJOR MINOR PATCH <<<"${LATEST#v}"
+              TAG="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+            fi
+          fi
+          # 该版本号已被占用就继续 +1,避免与手工标签撞车
+          while git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; do
+            IFS=. read -r MAJOR MINOR PATCH <<<"${TAG#v}"
+            TAG="v${MAJOR}.${MINOR}.$((PATCH + 1))"
+          done
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "本次版本:$TAG"
+
       - name: 组装部署包
         run: |
           set -euxo pipefail
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${{ steps.ver.outputs.version }}"
           BUNDLE="streetlight-deploy-${VERSION}"
           mkdir -p "$BUNDLE/images" "$BUNDLE/site"
           cp -r frontend_vue/dist/. "$BUNDLE/site/"
@@ -55,8 +107,17 @@ jobs:
           echo "BUNDLE_TGZ=${BUNDLE}.tar.gz" >> "$GITHUB_ENV"
           ls -lh "${BUNDLE}.tar.gz"
 
+      - name: 打 tag(构建全部成功后才创建)
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ steps.ver.outputs.tag }}" -m "Release ${{ steps.ver.outputs.tag }}"
+          git push origin "${{ steps.ver.outputs.tag }}"
+
       - name: 发布 GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.ver.outputs.tag }}
           files: ${{ env.BUNDLE_TGZ }}
           generate_release_notes: true
