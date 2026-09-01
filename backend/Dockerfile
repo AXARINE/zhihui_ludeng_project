@@ -22,6 +22,10 @@ RUN if [ "$USE_RS_PROXY" = "1" ]; then printf '%s\n' \
     'registry = "sparse+https://rsproxy.cn/index/"' \
     > "$CARGO_HOME/config.toml"; fi
 # build-base(gcc/musl-dev/make)+ cmake + perl:aws-lc-sys(rustls 加密后端)的 C 代码构建需要
+# 国内网络:apk 官方源 dl-cdn 偶发整包超时,默认换清华镜像;CI(--build-arg USE_RS_PROXY=0)走官方源
+RUN if [ "$USE_RS_PROXY" = "1" ]; then sed -i \
+    's#https://dl-cdn.alpinelinux.org#https://mirrors.tuna.tsinghua.edu.cn#g' \
+    /etc/apk/repositories; fi
 RUN apk add --no-cache build-base cmake perl ca-certificates
 # 先用空壳源码编译依赖层:Cargo.toml/lock 不变则缓存命中,改 src 不再全量重拉依赖
 COPY Cargo.toml Cargo.lock ./

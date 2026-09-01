@@ -212,6 +212,19 @@ A: 执行 `source ~/.cargo/env` 或重新打开 WSL 终端。
 **Q: 想让同学/老师在自己电脑或服务器上一键部署？**
 A: 用发布部署包：GitHub Release 下载 `streetlight-deploy-*.tar.gz`（或仓库 `deploy/` 目录），解包 → 填 `.env` → `./deploy.sh`（详见部署文档 §5.4）。
 
+**Q: `docker build` 报 "failed to fetch anonymous token" / 拉不动 rust:1-alpine**
+A: Docker Hub 在国内被墙，**换任何电脑都一样**，与项目代码无关。两种解法任选：
+  1. 永久（推荐）：Docker Desktop → Settings → Docker Engine，在 JSON 里加一行镜像源后点 Apply & Restart：
+     ```json
+     "registry-mirrors": ["https://docker.m.daocloud.io", "https://docker.1ms.run", "https://docker.xuanyuan.me"]
+     ```
+  2. 临时（单次）：换源拉取再改标签，之后构建正常走本地缓存：
+     ```bash
+     docker pull docker.m.daocloud.io/library/rust:1-alpine
+     docker tag docker.m.daocloud.io/library/rust:1-alpine rust:1-alpine
+     ```
+  镜像源会周期性失效，换源前可先用 `curl -sI https://<源>/v2/` 探活（返回 401/302 即活着）。
+
 **Q: 固件编译报 symlink / 权限错误**
 A: 在 WSL2 里跑 `./build.sh`（勿在 Windows 侧直接执行）；`bearpi-hm_nano` 是 submodule，首次需 `git submodule update --init`。
 
