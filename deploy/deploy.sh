@@ -1,38 +1,106 @@
 #!/usr/bin/env bash
-# 智慧路灯一键部署:准备 .env → 加载后端瘦镜像 → docker compose up -d
+# 智慧路灯一键部署:config.json → 生成 .env + Caddyfile → 加载后端瘦镜像 → compose up -d
 #
-# 两种来源都支持:
-#   a) GitHub Release 部署包(解压后自带 .env.example 与 images/streetlight-backend.tar);
-#   b) 本仓库 deploy/ 目录(.env 模板取 ../backend/.env.example,镜像需自行构建,见下方提示)。
+# 用法:tar xzf streetlight-deploy-*.tar.gz && cd streetlight-deploy-*/ && ./deploy.sh
+# 首次运行:从 config.example.json 生成 config.json 并退出,填好必填项后再次运行。
+# .env 与 Caddyfile 均由本脚本生成,请勿手改(会被下次部署覆盖)。
 set -euo pipefail
 cd "$(dirname "$0")"
 
-# ---------- 1. .env ----------
-if [ ! -f .env ]; then
-  if [ -f .env.example ]; then
-    cp .env.example .env
-  elif [ -f ../backend/.env.example ]; then
-    cp ../backend/.env.example .env
+# ---------- 1. config.json ----------
+if [ ! -f config.json ]; then
+  if [ -f config.example.json ]; then
+    cp config.example.json config.json
   else
-    echo "==> 错误:找不到 .env 模板,请从 GitHub Release 下载部署包运行本脚本" >&2
+    echo "==> 错误:找不到 config.example.json,请从 GitHub Release 下载完整部署包" >&2
     exit 1
   fi
-  echo "==> 已生成 .env,请填写华为云 AK/SK、JWT_SECRET 等必填项后重新运行本脚本"
+  echo "==> 已生成 config.json,请填写 huawei_ak/huawei_sk/huawei_project_id/iotda_endpoint/jwt_secret 后重新运行本脚本"
   exit 1
 fi
 
-# 必填项检查:缺失行 / 空值 / 模板占位值一律拦下,避免带默认密钥上线
-for var in HUAWEI_AK HUAWEI_SK HUAWEI_IOTDA_ENDPOINT JWT_SECRET; do
-  val="$(sed -nE "s/^${var}=(.*)$/\1/p" .env | tail -1)"
-  case "$val" in
-    "" | "访问密钥"* | "实例应用侧域名" | "change-me"*)
-      echo "==> .env 的 ${var} 未填写,请补齐后重试(HUAWEI_AK/HUAWEI_SK/HUAWEI_IOTDA_ENDPOINT/JWT_SECRET 均为必填)" >&2
-      exit 1
-      ;;
-  esac
-done
+# 扁平 JSON 取值(一键一行、值为字符串;值内不要包含双引号)
+json_get() {
+  sed -nE 's/^[[:space:]]*"'"$1"'"[[:space:]]*:[[:space:]]*"([^"]*)".*$/\1/p' config.json | tail -1
+}
 
-# ---------- 2. 后端瘦镜像 ----------
+DOMAIN="$(json_get domain)"
+AK="$(json_get huawei_ak)"
+SK="$(json_get huawei_sk)"
+PROJECT_ID="$(json_get huawei_project_id)"
+ENDPOINT="$(json_get iotda_endpoint)"
+REGION="$(json_get iotda_region)"
+JWT_SECRET="$(json_get jwt_secret)"
+SA_PWD="$(json_get bootstrap_super_admin_password)"
+ADMIN_PWD="$(json_get bootstrap_admin_password)"
+WEBHOOK_TOKEN="$(json_get iotda_webhook_token)"
+POLL_SECS="$(json_get iotda_poll_interval_secs)"
+AUTO_SYNC="$(json_get iotda_auto_sync_devices)"
+SYNC_SECS="$(json_get iotda_sync_interval_secs)"
+PG_PWD="$(json_get postgres_password)"
+PG_VOLUME="$(json_get pgdata_volume)"
+ORIGINS="$(json_get allowed_origins)"
+AI_KEY="$(json_get ai_api_key)"
+AI_BASE_URL="$(json_get ai_base_url)"
+AI_MODEL="$(json_get ai_model)"
+
+# 必填项检查:空值一律拦下,避免带默认密钥上线
+missing=()
+[ -z "$AK" ] && missing+=(huawei_ak)
+[ -z "$SK" ] && missing+=(huawei_sk)
+[ -z "$PROJECT_ID" ] && missing+=(huawei_project_id)
+[ -z "$ENDPOINT" ] && missing+=(iotda_endpoint)
+[ -z "$JWT_SECRET" ] && missing+=(jwt_secret)
+if [ "${#missing[@]}" -gt 0 ]; then
+  echo "==> config.json 必填项未填写:${missing[*]}" >&2
+  exit 1
+fi
+
+# ---------- 2. 生成 .env ----------
+{
+  echo "# 由 deploy.sh 根据 config.json 生成,请勿手改"
+  echo "HUAWEI_AK=$AK"
+  echo "HUAWEI_SK=$SK"
+  echo "HUAWEI_PROJECT_ID=$PROJECT_ID"
+  echo "HUAWEI_IOTDA_ENDPOINT=$ENDPOINT"
+  [ -n "$REGION" ] && echo "HUAWEI_IOTDA_REGION=$REGION"
+  echo "JWT_SECRET=$JWT_SECRET"
+  [ -n "$SA_PWD" ] && echo "BOOTSTRAP_SUPER_ADMIN_PASSWORD=$SA_PWD"
+  [ -n "$ADMIN_PWD" ] && echo "BOOTSTRAP_ADMIN_PASSWORD=$ADMIN_PWD"
+  [ -n "$WEBHOOK_TOKEN" ] && echo "IOTDA_WEBHOOK_TOKEN=$WEBHOOK_TOKEN"
+  [ -n "$POLL_SECS" ] && echo "IOTDA_POLL_INTERVAL_SECS=$POLL_SECS"
+  [ -n "$AUTO_SYNC" ] && echo "IOTDA_AUTO_SYNC_DEVICES=$AUTO_SYNC"
+  [ -n "$SYNC_SECS" ] && echo "IOTDA_SYNC_INTERVAL_SECS=$SYNC_SECS"
+  [ -n "$PG_PWD" ] && echo "POSTGRES_PASSWORD=$PG_PWD"
+  [ -n "$PG_VOLUME" ] && echo "PGDATA_VOLUME=$PG_VOLUME"
+  [ -n "$ORIGINS" ] && echo "ALLOWED_ORIGINS=$ORIGINS"
+  if [ -n "$AI_KEY" ]; then
+    echo "AI_API_KEY=$AI_KEY"
+    [ -n "$AI_BASE_URL" ] && echo "AI_BASE_URL=$AI_BASE_URL"
+    [ -n "$AI_MODEL" ] && echo "AI_MODEL=$AI_MODEL"
+  fi
+} > .env
+
+# ---------- 3. 生成 Caddyfile(domain 留空 = :80;填域名自动申请 HTTPS) ----------
+cat > Caddyfile <<EOF
+${DOMAIN:-:80} {
+	encode zstd gzip
+
+	root * /srv
+	handle /api/* {
+		reverse_proxy backend:8080
+	}
+	handle /docs* {
+		reverse_proxy backend:8080
+	}
+	handle {
+		try_files {path} /index.html
+		file_server
+	}
+}
+EOF
+
+# ---------- 4. 后端瘦镜像 ----------
 if ! docker image inspect streetlight-backend:latest >/dev/null 2>&1; then
   if [ -f images/streetlight-backend.tar ]; then
     echo "==> 加载后端镜像 images/streetlight-backend.tar ..."
@@ -46,10 +114,10 @@ if ! docker image inspect streetlight-backend:latest >/dev/null 2>&1; then
   fi
 fi
 
-# ---------- 3. 启动 ----------
+# ---------- 5. 启动 ----------
 docker compose up -d
 echo
 echo "==> 部署完成:"
-echo "    统一入口(前端 + API): http://<本机IP或域名>/   (Caddy :80,局域网可访问)"
+echo "    统一入口(前端 + API): http${DOMAIN:+s}://${DOMAIN:-<本机IP>}/"
 echo "    后端直连(仅本机):      http://127.0.0.1:8080/   Swagger: http://127.0.0.1:8080/docs"
 docker compose ps

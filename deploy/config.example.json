@@ -1,0 +1,26 @@
+{
+  "domain": "",
+
+  "huawei_ak": "",
+  "huawei_sk": "",
+  "huawei_project_id": "",
+  "iotda_endpoint": "",
+  "iotda_region": "",
+
+  "jwt_secret": "",
+  "bootstrap_super_admin_password": "",
+  "bootstrap_admin_password": "",
+
+  "iotda_webhook_token": "",
+  "iotda_poll_interval_secs": "",
+  "iotda_auto_sync_devices": "",
+  "iotda_sync_interval_secs": "",
+
+  "postgres_password": "",
+  "pgdata_volume": "",
+  "allowed_origins": "",
+
+  "ai_api_key": "",
+  "ai_base_url": "",
+  "ai_model": ""
+}

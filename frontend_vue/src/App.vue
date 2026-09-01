@@ -98,6 +98,17 @@ function fmtNotifTime(iso) {
     const p = n => (n < 10 ? '0' : '') + n
     return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
+// 日报字段兜底：后端新契约里可空字段序列化为 JSON null，
+// 旧日报没有该字段时同样是 null/undefined，统一显示 '--'。
+// 必须用 v == null（同时覆盖 null 与 undefined），不能用 !v ——
+// 否则真实的 0（如“今日 0 次失败”）会被误判成缺失。
+function fmtPct(v) {
+    return (v == null ? '--' : v + '%')
+}
+// 整数兜底（可空的计数类字段）
+function fmtNum(v) {
+    return (v == null ? '--' : v)
+}
 refreshUnread()
 setInterval(refreshUnread, 30000)
 
@@ -266,20 +277,36 @@ function handleLogout() {
     </div>
 
     <!-- 今日日报弹窗 -->
-    <el-dialog v-model="reportVisible" title="📅 每日日报" width="540" append-to-body>
+    <el-dialog v-model="reportVisible" title="📅 每日日报" width="620" append-to-body>
         <template v-if="reportData">
             <div class="report-grid">
+                <!-- 设备/灯：标“当前”的是生成时刻快照，标“当日”的是全天统计，两套口径别混 -->
                 <div class="report-cell"><b>{{ reportData.content.devices_total }}</b><span>设备总数</span></div>
-                <div class="report-cell"><b>{{ reportData.content.devices_online }}</b><span>在线设备</span></div>
-                <div class="report-cell"><b>{{ reportData.content.lamp_on }}</b><span>亮灯数量</span></div>
-                <div class="report-cell"><b>{{ reportData.content.alarms_today }}</b><span>今日告警</span></div>
-                <div class="report-cell"><b>{{ reportData.content.alarms_unhandled }}</b><span>未处理告警</span></div>
+                <div class="report-cell"><b>{{ reportData.content.devices_online }}</b><span>当前在线</span></div>
+                <div class="report-cell"><b>{{ fmtNum(reportData.content.devices_active) }}</b><span>当日活跃</span></div>
+                <div class="report-cell"><b>{{ fmtPct(reportData.content.online_rate) }}</b><span>当日在线率</span></div>
+                <div class="report-cell"><b>{{ reportData.content.lamp_on }}</b><span>当前亮灯</span></div>
+                <div class="report-cell"><b>{{ fmtPct(reportData.content.lamp_on_rate_now) }}</b><span>当前亮灯率</span></div>
+                <!-- 光照 -->
                 <div class="report-cell"><b>{{ reportData.content.avg_lux }}</b><span>平均光照(lux)</span></div>
+                <div class="report-cell"><b>{{ fmtNum(reportData.content.lux_max) }}</b><span>光照最高(lux)</span></div>
+                <div class="report-cell"><b>{{ fmtNum(reportData.content.lux_min) }}</b><span>光照最低(lux)</span></div>
                 <div class="report-cell"><b>{{ reportData.content.reports_lux }}</b><span>光照上报次数</span></div>
+                <!-- 告警 -->
+                <div class="report-cell"><b>{{ reportData.content.alarms_today }}</b><span>今日告警</span></div>
+                <div class="report-cell"><b>{{ fmtNum(reportData.content.alarm_offline) }}</b><span>离线告警</span></div>
+                <div class="report-cell"><b>{{ reportData.content.alarms_unhandled }}</b><span>未处理告警</span></div>
+                <!-- 指令 -->
                 <div class="report-cell"><b>{{ reportData.content.cmd_manual }}</b><span>手动指令</span></div>
-                <div class="report-cell"><b>{{ reportData.content.cmd_auto }}</b><span>自动指令</span></div>
+                <div class="report-cell"><b>{{ fmtNum(reportData.content.cmd_on) }}</b><span>开灯指令</span></div>
+                <div class="report-cell"><b>{{ fmtNum(reportData.content.cmd_off) }}</b><span>关灯指令</span></div>
+                <div class="report-cell"><b>{{ fmtNum(reportData.content.cmd_restore_auto) }}</b><span>恢复自动</span></div>
+                <div class="report-cell"><b class="warn">{{ fmtNum(reportData.content.cmd_failed) }}</b><span>指令失败</span></div>
             </div>
-            <div class="report-foot">日报日期：{{ reportData.report_date }}（前一日数据）· 每天 09:00 自动更新</div>
+            <div class="report-foot">
+                日报日期：{{ reportData.report_date }}（前一日数据）· 每天 09:00 自动更新 ·
+                “当前”为日报生成时刻的快照，其余为当日全天统计 · “--” 表示旧日报无此字段
+            </div>
         </template>
         <template v-else-if="reportEmpty">
             <div class="report-empty">
@@ -483,9 +510,11 @@ function handleLogout() {
 .notif-empty { text-align: center; color: #9AA3AF; padding: 20px 0; font-size: 13px; }
 
 /* ---- 日报弹窗 ---- */
-.report-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+/* 18 格 3 列 = 6 行，小屏下给网格加最大高度 + 滚动，避免弹窗溢出视口 */
+.report-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; max-height: 60vh; overflow-y: auto; padding-right: 2px; }
 .report-cell { background: #F7F9FC; border-radius: 10px; padding: 12px; text-align: center; }
 .report-cell b { display: block; font-size: 22px; color: #2F6FED; }
+.report-cell b.warn { color: #E5484D; }
 .report-cell span { font-size: 12px; color: #6B7280; }
 .report-foot { margin-top: 14px; font-size: 12px; color: #9AA3AF; text-align: center; }
 .report-empty { padding: 28px 0 18px; text-align: center; }

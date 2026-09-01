@@ -11,8 +11,9 @@
  * - 两端点之间的中间点（≤2 个）自由增删、任意拖动
  *
  * 预览图轴刻度：
- * - 默认对数横轴，轴范围随锚点照度自适应（拖点期间轴冻结，光标推出右边缘按住时连续扩量程）；
- *   0 照度锚点画在轴左端点，tooltip 显示真实值 0
+ * - 默认 symlog 拟合横轴（0~100 lux 线性、100 以上对数，ECharts 无原生
+ *   symlog 轴，用 value 轴 + 双向变换实现）；轴范围随锚点照度自适应
+ *   （拖点期间轴冻结，光标推出右边缘按住时连续扩量程）；0 lux 是正常坐标
  * - 可切换线性轴核对固件真实行为（固件 CurveEval 在 lux 线性域上分段线性插值）
  * - 不做缩放/平移：对数轴 + 少量可拖节点的编辑器（同参数均衡器 EQ 界面），
  *   业界惯例是自适应全量程 + 节点自由拖动；且 ECharts dataZoom 在对数轴上
@@ -204,44 +205,49 @@ const chartRef = ref(null)
 let chartInstance = null
 const scaleMode = ref('log') // 'log' 对数轴（默认） | 'linear' 线性轴
 
-// 横轴范围随锚点自适应（对数轴：低照度端按最小正照度留约半个数量级边距，
-// 高照度端按末点 ×2 留边距、封顶 100000；线性轴同理 ×1.1）；
-// 拖点期间轴完全冻结（值映射稳定，否则轴随被拖点伸缩会与光标互相追、
-// 来回振荡）；光标推出右边缘按住时按固定速度连续扩量程（不跳档），
-// 松手后轴重新自适应贴合；0 照度取不了对数，画在轴左端点（x = min 位置），
-// tooltip 显示真实值 0
-let currentRange = [100, 100000]
+// 横轴范围随锚点自适应（高照度端按末点 ×2 留边距、封顶 100000，低照度端
+// 恒 0；线性轴同理 ×1.1）；拖点期间轴完全冻结（值映射稳定，否则轴随被拖点
+// 伸缩会与光标互相追、来回振荡）；光标推出右边缘按住时连续扩量程
+// （不跳档），松手后轴重新自适应贴合
+//
+// "对数轴"实为 symlog 拟合：0~100 lux 线性（t = lux/100），100 以上对数
+// （t = 1 + log10(lux/100)）。低照度段有真实分辨率，0 lux 是正常坐标
+// （不再需要"0 画在轴左端点"的特例，左边也天然无需扩程——照度不可能 <0）。
+// ECharts 无原生 symlog 轴，用 value 轴 + 双向变换实现，
+// 刻度按整数 t 标注（0、100、1k、10k、100k）
+function luxToT(lux) {
+  const l = Math.max(lux, 0)
+  return l <= 100 ? l / 100 : 1 + Math.log10(l / 100)
+}
+function tToLux(t) {
+  return t <= 1 ? t * 100 : 100 * Math.pow(10, t - 1)
+}
+
+let currentRange = [0, 100000]
 let dragRange = null
-// 越界扩量程：定时器连续扩展，速度 = 对数轴 0.5 个数量级/秒、线性轴 ×1.6/秒
-const EXTEND_TICK_MS = 40
-const LOG_EXTEND_DECADES_PER_SEC = 0.5
-const LINEAR_EXTEND_FACTOR_PER_SEC = 1.6
-let extendTimer = null
+// 越界扩量程：rAF 逐帧连续扩展（GSAP Draggable autoScroll / Konva 边缘拖拽
+// 滚动同款模式），速度随光标越界深度线性增加——轻推慢扩、深推快扩，
+// 增量按真实帧间隔积分，无档位感
+const EXTEND_BASE_RATE = 0.08 // 刚越界时的速度（数量级/秒；线性轴 ×(1+r·2)/秒）
+const EXTEND_PER_PX = 0.005 // 每多越界 1px 增加的速度
+const EXTEND_MAX_RATE = 0.9 // 速度上限
+let extendRaf = null
+let lastExtendTs = 0
 let lastDragPx = 0
 let lastDragPy = 0
 
 function computeRange(pts, isLog) {
   const lastLux = pts[pts.length - 1].lux
-  const posLux = pts.map(p => p.lux).filter(l => l > 0)
-  const minPos = posLux.length ? Math.min(...posLux) : 0
-  let xMin
-  let xMax
-  if (isLog) {
-    xMin = minPos ? Math.max(minPos / 2, 1) : 100
-    xMax = Math.min(Math.max(lastLux * 2, 1000), 100000)
-    if (xMin >= xMax) xMin = xMax / 10
-  } else {
-    xMin = 0
-    xMax = Math.min(Math.max(lastLux * 1.1, 1000), 100000)
-  }
-  return [xMin, xMax]
+  const xMax = isLog
+    ? Math.min(Math.max(lastLux * 2, 1000), 100000)
+    : Math.min(Math.max(lastLux * 1.1, 1000), 100000)
+  return [0, xMax]
 }
 
-// 锚点 → 图坐标（0 映射到轴左端点）
+// 锚点 → 图坐标（对数模式经 symlog 变换；0 lux 是正常坐标）
 function toPlotX(lux, isLog) {
-  const l = Math.round(lux)
-  if (l > 0) return l
-  return isLog ? currentRange[0] : 0
+  const l = Math.max(Math.round(lux), 0)
+  return isLog ? luxToT(l) : l
 }
 
 function buildOption() {
@@ -274,11 +280,15 @@ function buildOption() {
 
   const isSingle = pts.length === 1
 
+  // 轴坐标范围（对数模式经 symlog 变换；currentRange 保持 lux 域供扩程/钳制）
+  const aMin = isLog ? luxToT(xMin) : xMin
+  const aMax = isLog ? luxToT(xMax) : xMax
+
   // 单锚点 = 恒定亮度：向轴两端延伸成水平线
   const lineData = isSingle
     ? [
-        { x: xMin, y: pts[0].pct, realLux: null, pct: pts[0].pct },
-        { x: xMax, y: pts[0].pct, realLux: null, pct: pts[0].pct }
+        { x: aMin, y: pts[0].pct, realLux: null, pct: pts[0].pct },
+        { x: aMax, y: pts[0].pct, realLux: null, pct: pts[0].pct }
       ]
     : plotPts
 
@@ -299,19 +309,30 @@ function buildOption() {
     },
     grid: { left: 48, right: 24, top: 28, bottom: 40, containLabel: false },
     xAxis: {
-      // 对数轴（log）符合人眼照度感知；线性轴（value）核对固件真实插值
-      type: isLog ? 'log' : 'value',
-      name: isLog ? '环境照度 lux（对数轴）' : '环境照度 lux',
+      // 两种模式都用 value 轴：对数模式的坐标是 symlog 变换后的 t
+      // （0~100 lux 线性、以上对数），线性模式直接用 lux
+      type: 'value',
+      name: isLog ? '环境照度 lux（100 以下线性，以上对数）' : '环境照度 lux',
       nameLocation: 'middle',
       nameGap: 26,
       nameTextStyle: { color: '#b4ada3', fontSize: 11 },
-      min: xMin,
-      max: xMax,
-      logBase: 10,
+      min: aMin,
+      max: aMax,
+      // 对数模式刻度按整数 t 标注：0、100、1k、10k、100k
+      interval: isLog ? 1 : undefined,
+      minInterval: isLog ? 1 : undefined,
       axisLabel: {
         color: '#a8a29c',
         fontSize: 11,
-        formatter: isLog ? (v) => (v >= 1000 ? `${v / 1000}k` : String(Math.round(v * 100) / 100)) : (v) => String(v)
+        // 一律整数标注：对数模式非整数刻度（如布局抖动时的 t=2.37）直接不显示，
+        // 避免冒出 23.442k 这种小数标签；线性模式刻度值取整
+        formatter: isLog
+          ? (t) => {
+              if (Math.abs(t - Math.round(t)) > 1e-6) return ''
+              const v = tToLux(Math.round(t))
+              return v >= 1000 ? `${Math.round(v / 1000)}k` : String(Math.round(v))
+            }
+          : (v) => String(Math.round(v))
       },
       axisLine: { lineStyle: { color: '#ded9cf' } },
       splitLine: { show: true, lineStyle: { color: '#f0ece4', type: 'dashed' } }
@@ -329,7 +350,7 @@ function buildOption() {
     },
     series: [
       {
-        // 锚点间连线（对数轴上呈现的正是固件 lux 线性插值的形状）
+        // 锚点间连线（symlog 轴上接近固件 lux 线性插值的真实形状）
         type: 'line',
         data: lineData.map(d => ({ value: [d.x, d.y], realLux: d.realLux, pct: d.pct })),
         symbol: 'none',
@@ -359,7 +380,9 @@ function buildOption() {
 
 function renderChart() {
   if (!chartInstance) return
-  chartInstance.setOption(buildOption(), true)
+  // 合并模式（非 notMerge）：轴/系列对象复用，扩程时每帧只是更新 min/max
+  // 和数据，不会整图销毁重建——否则标签布局反复重排，肉眼就是"抖"
+  chartInstance.setOption(buildOption())
 }
 
 // 锚点或轴模式变化 → 重画（拖动时实时触发；拖点期间轴范围冻结所以不跳动）
@@ -398,33 +421,59 @@ function onDragMove(e) {
   applyDragValue()
 }
 
-// 光标推出右边缘按住时，定时器按固定速度连续扩量程（光标不动也会继续扩，
-// 速度见 LOG/LINEAR_EXTEND_*；收回绘图区内即停）。扩完让被拖点重新求值，
-// 越界时 lux 会被钳到新的量程上限，点和输入框跟着边缘平滑增长
-function tickExtend() {
-  if (dragIndex < 0 || !dragRange || !chartInstance) return
+// 光标推出右边缘按住时，rAF 循环连续扩量程（光标不动也会继续扩，收回
+// 绘图区内即停）；速度随越界深度增加（EXTEND_* 常量），按真实帧间隔积分。
+// 扩完让被拖点重新求值，越界时 lux 会被钳到新的量程上限，
+// 点和输入框跟着边缘平滑增长
+function startExtendLoop() {
+  lastExtendTs = performance.now()
+  const step = (ts) => {
+    extendRaf = null
+    if (dragIndex < 0 || !dragRange || !chartInstance) return
+    // 帧间隔（掉帧时钳到 100ms，避免大步长跳变）
+    const dt = Math.min((ts - lastExtendTs) / 1000, 0.1)
+    lastExtendTs = ts
+    tickExtend(dt)
+    extendRaf = requestAnimationFrame(step)
+  }
+  extendRaf = requestAnimationFrame(step)
+}
+
+function stopExtendLoop() {
+  if (extendRaf != null) {
+    cancelAnimationFrame(extendRaf)
+    extendRaf = null
+  }
+}
+
+function tickExtend(dt) {
   if (dragRange[1] >= 100000) return
-  const edgePx = chartInstance.convertToPixel({ xAxisIndex: 0 }, dragRange[1])
-  if (!Number.isFinite(edgePx) || lastDragPx <= edgePx) return
-  const dt = EXTEND_TICK_MS / 1000
-  const factor = scaleMode.value === 'log'
-    ? Math.pow(10, LOG_EXTEND_DECADES_PER_SEC * dt)
-    : Math.pow(LINEAR_EXTEND_FACTOR_PER_SEC, dt)
+  const isLog = scaleMode.value === 'log'
+  const edgePx = chartInstance.convertToPixel({ xAxisIndex: 0 }, toPlotX(dragRange[1], isLog))
+  if (!Number.isFinite(edgePx)) return
+  const overshoot = lastDragPx - edgePx
+  if (overshoot <= 0) return
+  const rate = Math.min(EXTEND_BASE_RATE + overshoot * EXTEND_PER_PX, EXTEND_MAX_RATE)
+  const factor = isLog ? Math.pow(10, rate * dt) : 1 + rate * dt * 2
   dragRange = [dragRange[0], Math.min(dragRange[1] * factor, 100000)]
   currentRange = dragRange.slice()
-  renderChart()
+  // 先让被拖点按新上限重新求值，再统一渲染一次（顺序反过来会一帧内
+  // 渲染两次，点在"边缘内侧→边缘"之间来回跳）
   applyDragValue()
+  renderChart()
 }
 
 function applyDragValue() {
-  const [luxF, pctF] = chartInstance.convertFromPixel(
+  const [xF, pctF] = chartInstance.convertFromPixel(
     { xAxisIndex: 0, yAxisIndex: 0 },
     [lastDragPx, lastDragPy]
   )
-  if (!Number.isFinite(luxF) || !Number.isFinite(pctF)) return
+  if (!Number.isFinite(xF) || !Number.isFinite(pctF)) return
 
-  // 取整到整数 lux / %（与输入框一致），拖动全程平滑不吸附
-  let lux = Math.round(luxF)
+  // 对数模式轴坐标是 symlog 变换后的 t，反算回 lux；取整到整数 lux / %
+  // （与输入框一致），拖动全程平滑不吸附
+  const isLog = scaleMode.value === 'log'
+  let lux = Math.round(isLog ? tToLux(xF) : xF)
   let pct = Math.round(pctF)
   const n = anchors.value.length
   const isFirst = dragIndex === 0
@@ -432,8 +481,6 @@ function applyDragValue() {
   // 端点固定在自己的轴上：首点只动亮度（照度恒 0），末点只动照度（亮度恒 0%）
   if (isFirst) lux = 0
   if (isLast) pct = 0
-  // 对数轴：拖到左端点（≤ 轴最小值）即回到 0 照度（仅中间点/末点适用）
-  if (!isFirst && scaleMode.value === 'log' && luxF <= currentRange[0]) lux = 0
   const prev = dragIndex > 0 ? Math.round(anchors.value[dragIndex - 1].lux) : null
   const next = dragIndex < n - 1 ? Math.round(anchors.value[dragIndex + 1].lux) : null
   if (prev != null) lux = Math.max(lux, prev + 1)
@@ -453,10 +500,7 @@ function onDragEnd() {
   if (dragIndex < 0) return
   dragIndex = -1
   dragRange = null
-  if (extendTimer) {
-    clearInterval(extendTimer)
-    extendTimer = null
-  }
+  stopExtendLoop()
   if (chartRef.value) chartRef.value.style.cursor = ''
   // 解冻轴范围，重画时按新锚点自适应贴合（收缩在此时生效）
   renderChart()
@@ -475,11 +519,11 @@ function ensureChart() {
       dragIndex = hitAnchor(e)
       if (dragIndex >= 0 && chartRef.value) {
         chartRef.value.style.cursor = 'grabbing'
-        // 冻结轴范围；启动越界扩量程定时器（光标推出右边缘时连续扩展）
+        // 冻结轴范围；启动越界扩量程 rAF 循环（光标推出右边缘时连续扩展）
         dragRange = currentRange.slice()
         lastDragPx = e.offsetX ?? 0
         lastDragPy = e.offsetY ?? 0
-        extendTimer = window.setInterval(tickExtend, EXTEND_TICK_MS)
+        startExtendLoop()
       }
     })
     chartInstance.getZr().on('mousemove', (e) => {
@@ -515,10 +559,7 @@ onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
   window.removeEventListener('mousemove', onDragMove)
   window.removeEventListener('mouseup', onDragEnd)
-  if (extendTimer) {
-    clearInterval(extendTimer)
-    extendTimer = null
-  }
+  stopExtendLoop()
   if (chartInstance) {
     chartInstance.dispose()
     chartInstance = null
@@ -535,15 +576,11 @@ function handleResize() {
     <!-- 启用开关 -->
     <div class="curve-switch-row">
       <el-switch v-model="enabled" active-text="启用照度-亮度曲线" />
-      <span class="curve-hint">停用曲线时自动模式回退为阈值开关灯（施密特触发）</span>
     </div>
 
     <!-- 锚点编辑 -->
     <div v-if="enabled" class="curve-editor-body">
       <div class="anchor-head">
-        <span class="anchor-head-label">
-          曲线锚点（首点固定亮度轴 0 lux、末点固定照度轴 0%，中间可加/删，最多 4 点）
-        </span>
         <el-button
           size="small"
           type="primary"
@@ -605,7 +642,7 @@ function handleResize() {
 
       <!-- 预览图 -->
       <div class="chart-head">
-        <span class="chart-title">曲线预览 <span class="chart-tip">（拖动圆点调整锚点，横轴随锚点范围自适应）</span></span>
+        <span class="chart-title">曲线预览</span>
         <div class="scale-switch">
           <button
             :class="['scale-btn', { active: scaleMode === 'log' }]"
@@ -622,9 +659,6 @@ function handleResize() {
         </div>
       </div>
       <div ref="chartRef" class="curve-chart"></div>
-      <div class="chart-foot">
-        横轴随锚点照度范围自适应，拖动圆点调整锚点：首点在亮度轴上下移动（照度恒 0）、末点在照度轴左右移动（亮度恒 0%）、中间点自由拖动；首点以下取首点亮度、末点以上取末点亮度（固件按照度线性插值，对数轴下连线形状即为真实调光轨迹）
-      </div>
     </div>
   </div>
 </template>
@@ -641,11 +675,6 @@ function handleResize() {
   margin-bottom: 16px;
 }
 
-.curve-hint {
-  font-size: 12px;
-  color: #b4ada3;
-}
-
 .curve-editor-body {
   border: 1px dashed #ded9cf;
   border-radius: 10px;
@@ -655,14 +684,9 @@ function handleResize() {
 
 .anchor-head {
   display: flex;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   margin-bottom: 10px;
-}
-
-.anchor-head-label {
-  font-size: 13px;
-  color: #57504a;
 }
 
 .anchor-row {
@@ -710,12 +734,6 @@ function handleResize() {
   color: #1f1c19;
 }
 
-.chart-tip {
-  font-size: 12px;
-  font-weight: 400;
-  color: #b4ada3;
-}
-
 .scale-switch {
   display: flex;
   gap: 6px;
@@ -746,11 +764,5 @@ function handleResize() {
 .curve-chart {
   width: 100%;
   height: 240px;
-}
-
-.chart-foot {
-  font-size: 12px;
-  color: #b4ada3;
-  line-height: 1.6;
 }
 </style>
