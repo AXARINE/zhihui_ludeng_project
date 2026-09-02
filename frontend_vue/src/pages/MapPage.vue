@@ -174,6 +174,8 @@ function buildPopup(d) {
 }
 
 // 拉取数据并增量更新标记（保留已打开的弹窗，不闪屏）
+// 偶发瞬时失败（如数据库连接抖动）静默重试，不频繁打扰用户
+let fetchFailCount = 0
 async function fetchMapDevices() {
   loading.value = true
   try {
@@ -181,6 +183,7 @@ async function fetchMapDevices() {
     devices.value = [...(res || []), ...deviceStore.demoDevices]
     lastUpdated.value = formatBeijingTime(new Date().toISOString(), 'time')
     renderMarkers()
+    fetchFailCount = 0
 
     // 首次加载把视野适配到所有点位
     if (!firstFitDone && located.value.length > 0) {
@@ -193,7 +196,14 @@ async function fetchMapDevices() {
     }
   } catch (e) {
     console.log('地图点位加载失败：', e)
-    ElMessage.error('地图点位加载失败：' + (e?.response?.data || e.message))
+    fetchFailCount++
+    if (fetchFailCount >= 2) {
+      ElMessage.error('地图点位加载失败，正在自动重试…')
+      fetchFailCount = 0
+    }
+    if (autoRefresh.value && !firstFitDone) {
+      setTimeout(fetchMapDevices, 4000)
+    }
   } finally {
     loading.value = false
   }
@@ -471,10 +481,12 @@ async function batchControl(action) {
     const results = await Promise.allSettled(
       ids.map(id => {
         const d = devices.value.find(x => x.id === id)
-        // 演示灯：本地模拟控制（不调后端，避免 404）
+        // 演示灯：本地模拟控制（不调后端，避免 404）；状态必须写大写（ON/OFF/AUTO），
+        // 与 demoDevices 全局规范一致，否则首页大屏/设备列表会读不到状态
         if (d && d.demo) {
-          d.mode = action === 'auto' ? 'auto' : 'manual'
-          if (action === 'on' || action === 'off') d.lamp = action
+          d.mode = action === 'auto' ? 'AUTO' : 'MANUAL'
+          if (action === 'on') d.lamp = 'ON'
+          else if (action === 'off') d.lamp = 'OFF'
           const m = markerMap.get(id)
           if (m) { m.setIcon(buildIcon(d)); m.setPopupContent(buildPopup(d)) }
           return Promise.resolve({ success: true })
@@ -504,8 +516,10 @@ async function controlOne(id, action, popup) {
   const d = devices.value.find(x => x.id === id)
   if (!d) return
   if (d.demo) {
-    d.mode = action === 'auto' ? 'auto' : 'manual'
-    if (action === 'on' || action === 'off') d.lamp = action
+    // 状态写大写（与 demoDevices 规范一致，保证首页大屏/设备列表同步）
+    d.mode = action === 'auto' ? 'AUTO' : 'MANUAL'
+    if (action === 'on') d.lamp = 'ON'
+    else if (action === 'off') d.lamp = 'OFF'
     const m = markerMap.get(id)
     if (m) {
       m.setIcon(buildIcon(d))
