@@ -326,11 +326,16 @@ function handleLogout() {
     min-height: 100vh;
 }
 
-/* ---- 深墨侧边栏 ---- */
+/* ---- 深夜侧边栏：比内容区更沉一档；钉在视口（不随内容滚动，底部用户卡片常驻左下角） ---- */
 .sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    flex-shrink: 0;
     width: 220px;
-    background-color: #1c1b1a;
-    color: #a8a29c;
+    background-color: #090e19;
+    border-right: 1px solid var(--border-color);
+    color: var(--text-secondary);
     display: flex;
     flex-direction: column;
 }
@@ -338,10 +343,10 @@ function handleLogout() {
 .logo {
     padding: 22px 20px 18px;
     text-align: center;
-    border-bottom: 1px solid #2a2825;
+    border-bottom: 1px solid var(--border-color);
 }
 
-/* 侧栏标志：赤陶路灯（src/assets/logo.svg） */
+/* 侧栏标志：琥珀路灯（src/assets/logo.svg） */
 .logo-mark {
     display: block;
     width: 34px;
@@ -352,32 +357,28 @@ function handleLogout() {
 
 .logo h2 {
     margin: 0;
-    font-size: 20px;
+    font-size: 21px;
     font-family: var(--font-serif);
     font-weight: 600;
-    letter-spacing: 0.06em;
-    color: #f5f3ee;
+    letter-spacing: 0.1em;
+    color: var(--text-primary);
 }
 
 .logo p {
     margin: 6px 0 0 0;
-    font-size: 11px;
-    letter-spacing: 0.18em;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.22em;
     text-transform: uppercase;
-    color: #c96a4a;
+    color: var(--night-cyan);
 }
 
-/* 菜单：胶囊项，激活项赤陶浅底 */
+/* 菜单：胶囊项，激活项琥珀浅底 */
 .sidebar-menu {
     border-right: none;
     background-color: transparent;
     flex: 1;
     padding: 10px 8px;
-    --el-menu-bg-color: transparent;
-    --el-menu-text-color: #a8a29c;
-    --el-menu-hover-bg-color: #282622;
-    --el-menu-active-color: #e8a587;
-    --el-menu-border-color: transparent;
 }
 
 .sidebar-menu .el-menu-item {
@@ -389,12 +390,12 @@ function handleLogout() {
 }
 
 .sidebar-menu .el-menu-item:hover {
-    color: #e8e4dc;
+    color: var(--text-primary);
 }
 
 .sidebar-menu .el-menu-item.is-active {
-    background-color: rgba(201, 106, 74, 0.2);
-    color: #e8a587;
+    background-color: var(--primary-tint);
+    color: var(--primary-light);
     font-weight: 600;
 }
 
@@ -402,22 +403,22 @@ function handleLogout() {
 .user-info {
     margin: 12px;
     padding: 12px;
-    background: #232120;
-    border: 1px solid #2e2b28;
-    border-radius: 10px;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
     display: flex;
     align-items: center;
     gap: 10px;
     font-size: 13px;
-    color: #8a8578;
+    color: var(--text-secondary);
 }
 
 .user-avatar {
     width: 32px;
     height: 32px;
     border-radius: 50%;
-    background: #c96a4a;
-    color: #fff7f2;
+    background: var(--primary-color);
+    color: #1a1408;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -435,7 +436,7 @@ function handleLogout() {
 .user-name {
     font-size: 13px;
     font-weight: 500;
-    color: #e8e4dc;
+    color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -443,15 +444,15 @@ function handleLogout() {
 
 .user-role {
     font-size: 11px;
-    color: #7a746c;
+    color: var(--text-placeholder);
 }
 
 .logout-btn {
     background: none;
-    border: 1px solid #4a453f;
-    color: #a8a29c;
+    border: 1px solid var(--border-color-dark);
+    color: var(--text-secondary);
     padding: 3px 10px;
-    border-radius: 6px;
+    border-radius: 8px;
     cursor: pointer;
     font-size: 12px;
     flex-shrink: 0;
@@ -459,14 +460,14 @@ function handleLogout() {
 }
 
 .logout-btn:hover {
-    border-color: #be4b40;
-    color: #d07c72;
+    border-color: var(--danger-color);
+    color: #ea6f73;
 }
 
-/* ---- 暖纸内容区 ---- */
+/* ---- 深夜内容区 ---- */
 .main-content {
     flex: 1;
-    background-color: #faf9f5;
+    background-color: transparent;
     overflow-y: auto;
 }
 
@@ -481,16 +482,17 @@ function handleLogout() {
     width: 38px;
     height: 38px;
     border-radius: 50%;
-    border: 1px solid #E8ECF1;
-    background: #fff;
+    border: 1px solid var(--border-color);
+    background: var(--bg-panel);
+    color: var(--text-regular);
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
-    transition: box-shadow 0.15s;
+    box-shadow: var(--shadow-sm);
+    transition: box-shadow 0.15s, border-color 0.15s;
 }
-.bell-btn:hover { box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15); }
+.bell-btn:hover { box-shadow: var(--glow-amber); border-color: rgba(232, 163, 61, 0.4); }
 .notif-panel { max-height: 420px; overflow-y: auto; }
 .notif-head {
     display: flex;
@@ -500,35 +502,36 @@ function handleLogout() {
     font-weight: 600;
     font-size: 14px;
 }
-.report-link { border: none; background: none; color: #2F6FED; cursor: pointer; font-size: 12px; }
+.report-link { border: none; background: none; color: var(--night-cyan); cursor: pointer; font-size: 12px; }
 .notif-item {
     padding: 8px 10px;
     border-radius: 8px;
     margin-bottom: 6px;
-    background: #F7F9FC;
+    background: var(--bg-inset);
+    border: 1px solid transparent;
     cursor: pointer;
 }
-.notif-item.is-unread { background: #EAF1FE; }
+.notif-item.is-unread { background: rgba(232, 163, 61, 0.08); border-color: rgba(232, 163, 61, 0.2); }
 .notif-item-top { display: flex; align-items: center; gap: 6px; }
-.notif-tag { font-size: 11px; padding: 1px 8px; border-radius: 8px; color: #fff; flex-shrink: 0; }
-.notif-tag.report { background: #2F6FED; }
-.notif-tag.alert { background: #E5484D; }
+.notif-tag { font-size: 11px; padding: 1px 8px; border-radius: 8px; color: #0c1220; flex-shrink: 0; }
+.notif-tag.report { background: var(--night-cyan); }
+.notif-tag.alert { background: var(--danger-color); color: #fff; }
 .notif-title { font-size: 13px; font-weight: 500; flex: 1; }
-.notif-dot { width: 7px; height: 7px; border-radius: 50%; background: #E5484D; flex-shrink: 0; }
-.notif-content { font-size: 12px; color: #6B7280; margin: 4px 0; line-height: 1.5; }
-.notif-time { font-size: 11px; color: #9AA3AF; }
-.notif-empty { text-align: center; color: #9AA3AF; padding: 20px 0; font-size: 13px; }
+.notif-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--danger-color); flex-shrink: 0; }
+.notif-content { font-size: 12px; color: var(--text-secondary); margin: 4px 0; line-height: 1.5; }
+.notif-time { font-size: 11px; font-family: var(--font-mono); color: var(--text-placeholder); }
+.notif-empty { text-align: center; color: var(--text-placeholder); padding: 20px 0; font-size: 13px; }
 
 /* ---- 日报弹窗 ---- */
 /* 18 格 3 列 = 6 行，小屏下给网格加最大高度 + 滚动，避免弹窗溢出视口 */
 .report-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; max-height: 60vh; overflow-y: auto; padding-right: 2px; }
-.report-cell { background: #F7F9FC; border-radius: 10px; padding: 12px; text-align: center; }
-.report-cell b { display: block; font-size: 22px; color: #2F6FED; }
-.report-cell b.warn { color: #E5484D; }
-.report-cell span { font-size: 12px; color: #6B7280; }
-.report-foot { margin-top: 14px; font-size: 12px; color: #9AA3AF; text-align: center; }
+.report-cell { background: var(--bg-inset); border: 1px solid var(--border-color); border-radius: 12px; padding: 12px; text-align: center; }
+.report-cell b { display: block; font-size: 22px; font-family: var(--font-mono); color: var(--primary-light); }
+.report-cell b.warn { color: var(--danger-color); }
+.report-cell span { font-size: 12px; color: var(--text-secondary); }
+.report-foot { margin-top: 14px; font-size: 12px; color: var(--text-placeholder); text-align: center; }
 .report-empty { padding: 28px 0 18px; text-align: center; }
 .report-empty-icon { font-size: 40px; }
-.report-empty-title { margin-top: 10px; font-size: 15px; font-weight: 600; color: #4B5563; }
-.report-empty-tip { margin-top: 8px; font-size: 12px; color: #9AA3AF; }
+.report-empty-title { margin-top: 10px; font-size: 15px; font-weight: 600; color: var(--text-regular); }
+.report-empty-tip { margin-top: 8px; font-size: 12px; color: var(--text-placeholder); }
 </style>

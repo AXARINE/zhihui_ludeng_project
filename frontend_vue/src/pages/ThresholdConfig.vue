@@ -437,7 +437,7 @@ onMounted(() => {
 .page-header {
   margin-bottom: 20px;
   padding-bottom: 14px;
-  border-bottom: 1px solid #efebe3;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .page-header h2 {
@@ -448,20 +448,21 @@ onMounted(() => {
   font-size: 24px;
   font-family: var(--font-serif);
   font-weight: 600;
-  color: #1f1c19;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
 }
 
 .page-header h2::before {
   content: '';
   width: 4px;
   height: 0.95em;
-  background: #c96a4a;
+  background: var(--primary-color);
   border-radius: 2px;
 }
 
 .page-header p {
   margin: 0;
-  color: #8a837b;
+  color: var(--text-secondary);
 }
 
 .device-select-card {
@@ -505,7 +506,7 @@ onMounted(() => {
 .no-device {
   text-align: center;
   padding: 40px;
-  color: #8a837b;
+  color: var(--text-secondary);
   font-size: 16px;
 }
 </style>

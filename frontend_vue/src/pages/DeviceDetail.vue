@@ -225,7 +225,7 @@ onMounted(() => {
 
 .coord-decimal {
   font-size: 12px;
-  color: #8a837b;
+  color: var(--text-secondary);
   font-family: var(--font-mono);
 }
 
@@ -248,16 +248,17 @@ onMounted(() => {
   font-size: 20px;
   font-family: var(--font-serif);
   font-weight: 600;
-  color: #1f1c19;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
 }
 
 .lamp-on {
-  color: #c08340;
+  color: var(--primary-light);
   font-weight: 600;
 }
 
 .lamp-off {
-  color: #a8a29c;
+  color: var(--text-secondary);
 }
 
 .not-found {
@@ -267,12 +268,12 @@ onMounted(() => {
 
 .not-found h3 {
   margin-bottom: 10px;
-  color: #be4b40;
+  color: var(--danger-color);
 }
 
 .not-found p {
   margin-bottom: 20px;
-  color: #8a837b;
+  color: var(--text-secondary);
 }
 
 .control-card {
@@ -292,7 +293,7 @@ onMounted(() => {
 .chart-placeholder {
   text-align: center;
   padding: 40px;
-  color: #8a837b;
+  color: var(--text-secondary);
 }
 
 .chart-placeholder p {

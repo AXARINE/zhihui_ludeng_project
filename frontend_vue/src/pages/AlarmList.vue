@@ -239,7 +239,7 @@ onMounted(() => {
 .page-header {
   margin-bottom: 20px;
   padding-bottom: 14px;
-  border-bottom: 1px solid #efebe3;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .page-header h2 {
@@ -250,20 +250,21 @@ onMounted(() => {
   font-size: 24px;
   font-family: var(--font-serif);
   font-weight: 600;
-  color: #1f1c19;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
 }
 
 .page-header h2::before {
   content: '';
   width: 4px;
   height: 0.95em;
-  background: #c96a4a;
+  background: var(--primary-color);
   border-radius: 2px;
 }
 
 .page-header p {
   margin: 0;
-  color: #8a837b;
+  color: var(--text-secondary);
 }
 
 .alarm-stats {
@@ -281,21 +282,21 @@ onMounted(() => {
   font-size: 30px;
   font-weight: 600;
   font-family: var(--font-mono);
-  color: #1f1c19;
+  color: var(--text-primary);
 }
 
 .stat-label {
   font-size: 13px;
-  color: #8a837b;
+  color: var(--text-secondary);
   margin-top: 6px;
 }
 
 .stat-card.pending .stat-value {
-  color: #be4b40;
+  color: var(--danger-color);
 }
 
 .stat-card.resolved .stat-value {
-  color: #5f8f5a;
+  color: var(--success-color);
 }
 
 .filter-card {
@@ -316,6 +317,6 @@ onMounted(() => {
 }
 
 .pending-text {
-  color: #b4ada3;
+  color: var(--text-placeholder);
 }
 </style>

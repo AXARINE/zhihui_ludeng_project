@@ -168,7 +168,7 @@ function buildPopup(d) {
       ${ctrlBtns}
       ${repairBtn}
       ${d.demo
-        ? '<div class="popup-tip" style="margin-top:8px;color:#9AA3AF;font-size:12px">演示点位：本地模拟，不接真实硬件；控灯即时生效。</div>'
+        ? '<div class="popup-tip" style="margin-top:8px;color:#8e9bb0;font-size:12px">演示点位：本地模拟，不接真实硬件；控灯即时生效。</div>'
         : `<button class="popup-detail-btn" data-id="${escapeHtml(d.id)}">查看详情</button>`}
     </div>`
 }
@@ -406,8 +406,8 @@ function onSelMouseMove(e) {
   )
   if (!selRect) {
     selRect = L.rectangle(bounds, {
-      color: '#c96a4a', weight: 1.5,
-      fillColor: '#c96a4a', fillOpacity: 0.12,
+      color: '#e8a33d', weight: 1.5,
+      fillColor: '#e8a33d', fillOpacity: 0.12,
       interactive: false
     }).addTo(map)
   } else {
@@ -731,7 +731,7 @@ onBeforeUnmount(() => {
 .page-header {
   margin-bottom: 16px;
   padding-bottom: 14px;
-  border-bottom: 1px solid #efebe3;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .page-header h2 {
@@ -742,20 +742,21 @@ onBeforeUnmount(() => {
   font-size: 24px;
   font-family: var(--font-serif);
   font-weight: 600;
-  color: #1f1c19;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
 }
 
 .page-header h2::before {
   content: '';
   width: 4px;
   height: 0.95em;
-  background: #c96a4a;
+  background: var(--primary-color);
   border-radius: 2px;
 }
 
 .page-header p {
   margin: 0;
-  color: #8a837b;
+  color: var(--text-secondary);
 }
 
 /* ---- 地图卡片：填满剩余高度 ---- */
@@ -763,10 +764,10 @@ onBeforeUnmount(() => {
   position: relative;
   flex: 1;
   min-height: 480px;
-  border: 1px solid #e8e4dc;
-  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
   overflow: hidden;
-  background: #fff;
+  background: var(--bg-panel);
   box-shadow: var(--shadow-sm);
 }
 
@@ -780,9 +781,9 @@ onBeforeUnmount(() => {
 .float-panel {
   position: absolute;
   z-index: 1000;   /* leaflet 控件层是 1000 以内，压过它 */
-  background: rgba(255, 255, 255, 0.94);
-  border: 1px solid #e8e4dc;
-  border-radius: 10px;
+  background: rgba(19, 28, 45, 0.92);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
   box-shadow: var(--shadow-md);
   backdrop-filter: blur(4px);
 }
@@ -805,23 +806,23 @@ onBeforeUnmount(() => {
 }
 
 .stats-row.total .stats-num {
-  color: #1f1c19;
+  color: var(--text-primary);
 }
 
 .stats-num {
   font-size: 20px;
   font-weight: 600;
   font-family: var(--font-mono);
-  color: #57504a;
+  color: var(--text-regular);
 }
 
-.stats-num.ok { color: #5f8f5a; }
-.stats-num.warn { color: #c08340; }
-.stats-num.bad { color: #be4b40; }
+.stats-num.ok { color: var(--success-color); }
+.stats-num.warn { color: var(--primary-light); }
+.stats-num.bad { color: var(--danger-color); }
 
 .stats-label {
   font-size: 12px;
-  color: #8a837b;
+  color: var(--text-secondary);
 }
 
 .panel-actions {
@@ -837,7 +838,7 @@ onBeforeUnmount(() => {
 
 .updated-at {
   font-size: 11px;
-  color: #b4ada3;
+  color: var(--text-placeholder);
   text-align: center;
 }
 
@@ -855,16 +856,16 @@ onBeforeUnmount(() => {
 
 .batch-hint {
   font-size: 12px;
-  color: #8a837b;
+  color: var(--text-secondary);
 }
 
 .batch-count {
   font-size: 13px;
-  color: #57504a;
+  color: var(--text-regular);
 }
 
 .batch-count b {
-  color: #c96a4a;
+  color: var(--primary-color);
   font-family: var(--font-mono);
   font-size: 15px;
 }
@@ -896,7 +897,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   font-size: 12px;
-  color: #57504a;
+  color: var(--text-regular);
 }
 
 /* 图例小圆点（颜色复用全局 .pin-on / .pin-online-off / .pin-offline） */
@@ -905,8 +906,8 @@ onBeforeUnmount(() => {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  border: 2px solid #fff;
-  box-shadow: 0 1px 3px rgba(31, 28, 25, 0.3);
+  border: 2px solid rgba(234, 228, 211, 0.9);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45);
   flex-shrink: 0;
 }
 
@@ -920,7 +921,7 @@ onBeforeUnmount(() => {
 
 .unlocated-title {
   font-size: 12px;
-  color: #8a837b;
+  color: var(--text-secondary);
   margin-bottom: 8px;
 }
 
@@ -941,6 +942,51 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
+/* 底图反色压暗成夜色：只作用瓦片层，点位/弹窗在独立 pane，不受影响。
+   浅色瓦片先 invert 成暗底，再 hue-rotate 把反色后的红色系拉回青蓝夜色调 */
+.map-card .leaflet-tile-pane {
+  filter: invert(0.92) hue-rotate(185deg) brightness(0.9) contrast(0.92) saturate(0.45);
+}
+
+/* Leaflet 弹窗深色化 */
+.map-card .leaflet-popup-content-wrapper {
+  background: var(--bg-panel);
+  color: var(--text-regular);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+}
+
+.map-card .leaflet-popup-tip {
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+}
+
+.map-card .leaflet-popup-close-button {
+  color: var(--text-secondary);
+}
+
+/* 缩放控件 / 署名栏深色化 */
+.map-card .leaflet-bar a {
+  background: var(--bg-panel);
+  color: var(--text-regular);
+  border-bottom-color: var(--border-color);
+}
+
+.map-card .leaflet-bar a:hover {
+  background: var(--bg-panel-hover);
+  color: var(--text-primary);
+}
+
+.map-card .leaflet-control-attribution {
+  background: rgba(12, 18, 32, 0.72);
+  color: var(--text-placeholder);
+}
+
+.map-card .leaflet-control-attribution a {
+  color: var(--night-cyan);
+}
+
 .map-card .lamp-pin {
   position: relative;
   width: 22px;
@@ -950,8 +996,8 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   margin: 0 auto;
-  border: 2px solid #fff;
-  box-shadow: 0 1px 4px rgba(31, 28, 25, 0.35);
+  border: 2px solid rgba(234, 228, 211, 0.9);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
   transition: transform 0.15s;
 }
 
@@ -962,10 +1008,11 @@ onBeforeUnmount(() => {
   right: -9px;
   width: 16px;
   height: 16px;
-  background: #fff;
+  background: var(--bg-panel);
+  border: 1px solid rgba(229, 72, 77, 0.45);
   border-radius: 50%;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.35);
-  color: #E5484D;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  color: var(--danger-color);
   font-size: 11px;
   line-height: 16px;
   text-align: center;
@@ -975,36 +1022,36 @@ onBeforeUnmount(() => {
 /* 弹窗内单设备控制按钮 */
 .popup-btns { display: flex; gap: 6px; margin: 10px 0 6px; }
 .popup-btns .pbtn {
-  flex: 1; border: none; border-radius: 6px; padding: 5px 0;
+  flex: 1; border: none; border-radius: 8px; padding: 5px 0;
   font-size: 12px; color: #fff; cursor: pointer; transition: opacity 0.15s;
 }
 .popup-btns .pbtn:hover { opacity: 0.85; }
-.popup-btns .pbtn.on { background: #0FA46E; }
-.popup-btns .pbtn.off { background: #78909C; }
-.popup-btns .pbtn.auto { background: #2F6FED; }
+.popup-btns .pbtn.on { background: var(--success-color); }
+.popup-btns .pbtn.off { background: #5b6678; }
+.popup-btns .pbtn.auto { background: var(--night-cyan); }
 
 /* 通知维修按钮 */
 .popup-repair {
   width: 100%; margin-top: 8px; padding: 6px 0;
-  border: 1px solid #E5484D; background: #fff; color: #E5484D;
-  border-radius: 6px; font-size: 12px; cursor: pointer; transition: all 0.15s;
+  border: 1px solid var(--danger-color); background: transparent; color: var(--danger-color);
+  border-radius: 8px; font-size: 12px; cursor: pointer; transition: all 0.15s;
 }
-.popup-repair:hover { background: #E5484D; color: #fff; }
+.popup-repair:hover { background: var(--danger-color); color: #fff; }
 
 .map-card .lamp-marker:hover .lamp-pin {
   transform: scale(1.25);
 }
 
-/* 框选中的点位：放大 + 赤陶描边光圈（放在 hover 之后，同特异性后者生效） */
+/* 框选中的点位：放大 + 琥珀描边光圈（放在 hover 之后，同特异性后者生效） */
 .map-card .lamp-pin.selected {
   transform: scale(1.35);
-  border-color: #fff;
-  box-shadow: 0 0 0 3px rgba(201, 106, 74, 0.6), 0 2px 8px rgba(31, 28, 25, 0.4);
+  border-color: rgba(234, 228, 211, 0.95);
+  box-shadow: 0 0 0 3px rgba(232, 163, 61, 0.55), 0 2px 8px rgba(0, 0, 0, 0.5);
 }
 
 /* 在线 · 亮灯：琥珀 + 光晕呼吸动画 */
 .map-card .pin-on {
-  background: #dda15e;
+  background: var(--primary-light);
 }
 
 .map-card .pin-on .pin-core {
@@ -1017,12 +1064,12 @@ onBeforeUnmount(() => {
 
 /* 在线 · 灭灯：绿 */
 .map-card .pin-online-off {
-  background: #5f8f5a;
+  background: var(--success-color);
 }
 
 /* 离线：灰 */
 .map-card .pin-offline {
-  background: #a8a29c;
+  background: #5b6678;
 }
 
 /* 点位下方的小标签 */
@@ -1031,20 +1078,20 @@ onBeforeUnmount(() => {
   margin-top: 2px;
   font-size: 11px;
   line-height: 1.2;
-  color: #1f1c19;
-  background: rgba(255, 255, 255, 0.85);
+  color: var(--text-primary);
+  background: rgba(19, 28, 45, 0.85);
   padding: 1px 5px;
   border-radius: 4px;
   white-space: nowrap;
   max-width: 110px;
   overflow: hidden;
   text-overflow: ellipsis;
-  box-shadow: 0 1px 2px rgba(31, 28, 25, 0.15);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.4);
 }
 
 @keyframes lamp-glow {
-  0%, 100% { box-shadow: 0 0 0 0 rgba(221, 161, 94, 0.7); }
-  50% { box-shadow: 0 0 0 6px rgba(221, 161, 94, 0); }
+  0%, 100% { box-shadow: 0 0 0 0 rgba(242, 201, 121, 0.7); }
+  50% { box-shadow: 0 0 0 6px rgba(242, 201, 121, 0); }
 }
 
 /* ---- 弹窗内容 ---- */
@@ -1060,10 +1107,10 @@ onBeforeUnmount(() => {
 .popup-title {
   font-weight: 600;
   font-size: 14px;
-  color: #1f1c19;
+  color: var(--text-primary);
   margin-bottom: 8px;
   padding-bottom: 6px;
-  border-bottom: 1px solid #efebe3;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .popup-row {
@@ -1072,11 +1119,11 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 16px;
   padding: 3px 0;
-  color: #57504a;
+  color: var(--text-regular);
 }
 
 .popup-row > span:first-child {
-  color: #8a837b;
+  color: var(--text-secondary);
   font-size: 12px;
   flex-shrink: 0;
 }
@@ -1098,6 +1145,14 @@ onBeforeUnmount(() => {
   font-family: var(--font-mono);
   font-size: 12px;
   white-space: nowrap;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.map-card .drag-coord-tip.leaflet-tooltip-top::before {
+  border-top-color: var(--border-color);
 }
 
 .popup-tag {
@@ -1107,13 +1162,13 @@ onBeforeUnmount(() => {
 }
 
 .popup-tag.ok {
-  color: #5f8f5a;
-  background: #f0f6ee;
+  color: var(--success-color);
+  background: rgba(111, 174, 106, 0.14);
 }
 
 .popup-tag.bad {
-  color: #be4b40;
-  background: #f9ece9;
+  color: #ea6f73;
+  background: rgba(229, 72, 77, 0.14);
 }
 
 .popup-detail-btn {
@@ -1121,15 +1176,15 @@ onBeforeUnmount(() => {
   margin-top: 10px;
   padding: 6px 0;
   border: none;
-  border-radius: 6px;
-  background: #c96a4a;
-  color: #fff7f2;
+  border-radius: 8px;
+  background: var(--primary-color);
+  color: #241a08;
   font-size: 13px;
   cursor: pointer;
   transition: background 0.15s;
 }
 
 .popup-detail-btn:hover {
-  background: #a8532f;
+  background: var(--primary-dark);
 }
 </style>

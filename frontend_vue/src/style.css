@@ -1,48 +1,96 @@
 /**
- * 全局样式文件 — 「深栏暖纸」主题
+ * 全局样式文件 — 「深夜城市 · 铅字夜档」主题
  *
- * 设计语言（参考 claude.com / pi.dev 的暖纸极简风）：
- * - 内容区：暖米白纸质背景 #FAF9F5，白卡片 + 细暖灰边框，几乎无投影
- * - 侧边栏：深墨 #1C1B1A（见 App.vue）
- * - 点缀色：赤陶 #C96A4A，只用于主按钮、激活态、重点数据
- * - 字体：标题衬线（paper 感）、正文无衬线、数字等宽
+ * 设计语言：
+ * - 题材取自路灯本身：深夜蓝黑夜空为底，钠灯琥珀为唯一暖色（只属于"灯"），
+ *   青蓝为城市夜色（环境数据、辅助信息）
+ * - 标题用霞鹜新致宋（干净明朝感），西文展示用 Fraunces，数字读数用
+ *   IBM Plex Mono，正文用系统中黑——大屏的"档案感"全部来自字体对峙
+ * - 卡片：深蓝面板 + 发丝级冷灰边框 + 极轻环境光，几乎无投影
  *
  * Element Plus 换肤原理：
- * 2.x 全部组件颜色都读取 --el-* CSS 变量，在 :root 覆盖即可全局生效，
- * 不需要改任何组件代码。
+ * 先引入官方暗色变量（html.dark），再在 html.dark 上覆盖 --el-* 变量，
+ * 全局生效，不需要改任何组件代码。
  */
+
+/* Element Plus 官方暗色变量（必须最先 @import） */
+@import 'element-plus/theme-chalk/dark/css-vars.css';
+
+/* ============================================ */
+/* 0. 本地字体（断网可用） */
+/* ============================================ */
+@font-face {
+  font-family: 'DisplaySong';
+  src: url('./assets/fonts/DisplaySong.woff2') format('woff2');
+  font-weight: 400 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Fraunces';
+  src: url('./assets/fonts/Fraunces.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('./assets/fonts/IBMPlexMono-400.woff2') format('woff2');
+  font-weight: 400;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('./assets/fonts/IBMPlexMono-500.woff2') format('woff2');
+  font-weight: 500;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'IBM Plex Mono';
+  src: url('./assets/fonts/IBMPlexMono-600.woff2') format('woff2');
+  font-weight: 600;
+  font-display: swap;
+}
 
 /* ============================================ */
 /* 1. 设计令牌（本项目自定义变量） */
 /* ============================================ */
 :root {
-  /* 主色调 — 赤陶 */
-  --primary-color: #c96a4a;
-  --primary-dark: #a8532f;
-  --primary-light: #e09b83;
-  --primary-tint: #faede7;   /* 极浅赤陶，用于选中态底色 */
+  /* 主色调 — 钠灯琥珀 */
+  --primary-color: #e8a33d;
+  --primary-dark: #c07f21;
+  --primary-light: #f2c979;
+  --primary-tint: rgba(232, 163, 61, 0.12);  /* 极浅琥珀，选中态底色 */
 
-  /* 语义色（暖调） */
-  --success-color: #5f8f5a;
-  --warning-color: #dda15e;
-  --danger-color: #be4b40;
-  --info-color: #8a837b;
+  /* 夜色 — 城市青蓝 */
+  --night-cyan: #4fb3c8;
+  --night-cyan-dim: #3a8a9b;
+
+  /* 语义色（暗底适配） */
+  --success-color: #6fae6a;
+  --warning-color: #e8a33d;
+  --danger-color: #e5484d;
+  --info-color: #8e9bb0;
 
   /* 文字颜色 */
-  --text-primary: #1f1c19;   /* 墨色 */
-  --text-regular: #57504a;
-  --text-secondary: #8a837b;
-  --text-placeholder: #b4ada3;
+  --text-primary: #eae4d3;    /* 暖白（被路灯照亮的纸） */
+  --text-regular: #b6bfce;
+  --text-secondary: #8e9bb0;
+  --text-placeholder: #5b6678;
 
   /* 背景颜色 */
-  --bg-color: #faf9f5;       /* 暖米白（纸） */
-  --bg-white: #ffffff;
-  --bg-dark: #1c1b1a;        /* 深墨（侧边栏） */
-  --bg-warm: #f5f2ec;        /* 表头/面板底 */
+  --bg-color: #0c1220;        /* 深夜 */
+  --bg-panel: #131c2d;        /* 面板 */
+  --bg-panel-hover: #182338;  /* 面板悬停 */
+  --bg-inset: #0f1626;        /* 凹陷区（表格斑马纹、输入框） */
 
-  /* 边框 */
-  --border-color: #e8e4dc;
-  --border-color-dark: #ded9cf;
+  /* 边框（发丝级冷灰） */
+  --border-color: rgba(148, 168, 200, 0.12);
+  --border-color-dark: rgba(148, 168, 200, 0.2);
 
   /* 间距 */
   --spacing-xs: 4px;
@@ -51,122 +99,132 @@
   --spacing-lg: 24px;
   --spacing-xl: 32px;
 
-  /* 圆角 */
+  /* 圆角（统一标尺：容器 12 / 控件 8 / 装饰小件 4 以下） */
   --border-radius-sm: 4px;
   --border-radius-md: 8px;
   --border-radius-lg: 12px;
 
-  /* 阴影（暖调、极轻） */
-  --shadow-sm: 0 1px 2px rgba(60, 50, 40, 0.05);
-  --shadow-md: 0 2px 8px rgba(60, 50, 40, 0.07);
-  --shadow-lg: 0 4px 16px rgba(60, 50, 40, 0.1);
+  /* 阴影（暗底上投影几乎不可见，改用琥珀环境光） */
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 3px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 28px rgba(0, 0, 0, 0.5);
+  --glow-amber: 0 0 24px rgba(232, 163, 61, 0.18);
 
-  /* 字体族
-     注：标题曾用西文衬线栈（Georgia + Songti SC），但中文在 Windows 上
-     只能回落到宋体，渲染效果差。现统一用系统中文字体，标题靠 600 字重
-     和字距体现"展示感"，不再依赖衬线。 */
-  --font-serif: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, 'Courier New', monospace;
+  /* 字体族（展示宋体 = 霞鹜新致宋，边缘干净的书卷气明朝；西文展示 Fraunces） */
+  --font-serif: 'DisplaySong', 'Fraunces', 'Songti SC', 'STSong', 'SimSun', serif;
+  --font-display: 'Fraunces', 'DisplaySong', 'Songti SC', serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', 'Cascadia Mono', Consolas, monospace;
+  --font-body: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
 }
 
 /* ============================================ */
-/* 2. Element Plus 主题变量覆盖（换肤核心） */
+/* 2. Element Plus 主题变量覆盖（在官方暗色之上换肤） */
 /* ============================================ */
-:root {
-  /* 主色阶 */
-  --el-color-primary: #c96a4a;
-  --el-color-primary-dark-2: #a8532f;
-  --el-color-primary-light-3: #d88f77;
-  --el-color-primary-light-5: #e4b5a5;
-  --el-color-primary-light-7: #efd1c6;
-  --el-color-primary-light-8: #f5ded4;
-  --el-color-primary-light-9: #faede7;
+html.dark {
+  /* 主色阶（琥珀） */
+  --el-color-primary: #e8a33d;
+  --el-color-primary-dark-2: #c07f21;
+  --el-color-primary-light-3: #ecb25c;
+  --el-color-primary-light-5: #c99b5e;
+  --el-color-primary-light-7: #7a6132;
+  --el-color-primary-light-8: #4d3f22;
+  --el-color-primary-light-9: #2a2417;
 
   /* 成功 */
-  --el-color-success: #5f8f5a;
-  --el-color-success-dark-2: #4f7a4b;
-  --el-color-success-light-3: #87ac82;
-  --el-color-success-light-5: #afc7ab;
-  --el-color-success-light-7: #d3e2d1;
-  --el-color-success-light-8: #e2eddf;
-  --el-color-success-light-9: #f0f6ee;
+  --el-color-success: #6fae6a;
+  --el-color-success-dark-2: #598e55;
+  --el-color-success-light-3: #8cbf88;
+  --el-color-success-light-5: #5c7a58;
+  --el-color-success-light-7: #3c5139;
+  --el-color-success-light-8: #2b3a2a;
+  --el-color-success-light-9: #1a2519;
 
-  /* 警告 */
-  --el-color-warning: #dda15e;
-  --el-color-warning-dark-2: #c08340;
-  --el-color-warning-light-3: #e7ba8a;
-  --el-color-warning-light-5: #eed0af;
-  --el-color-warning-light-7: #f4e2cb;
-  --el-color-warning-light-8: #f8ecdb;
-  --el-color-warning-light-9: #fbf5ea;
+  /* 警告 = 琥珀同族 */
+  --el-color-warning: #e8a33d;
+  --el-color-warning-dark-2: #c07f21;
+  --el-color-warning-light-3: #ecb25c;
+  --el-color-warning-light-5: #8a6c35;
+  --el-color-warning-light-7: #54431f;
+  --el-color-warning-light-8: #382d17;
+  --el-color-warning-light-9: #241e10;
 
   /* 危险 / 错误 */
-  --el-color-danger: #be4b40;
-  --el-color-danger-dark-2: #a03b31;
-  --el-color-danger-light-3: #d07c72;
-  --el-color-danger-light-5: #dfa9a2;
-  --el-color-danger-light-7: #ebc7c2;
-  --el-color-danger-light-8: #f2d9d5;
-  --el-color-danger-light-9: #f9ece9;
-  --el-color-error: #be4b40;
-  --el-color-error-dark-2: #a03b31;
-  --el-color-error-light-3: #d07c72;
-  --el-color-error-light-5: #dfa9a2;
-  --el-color-error-light-7: #ebc7c2;
-  --el-color-error-light-8: #f2d9d5;
-  --el-color-error-light-9: #f9ece9;
+  --el-color-danger: #e5484d;
+  --el-color-danger-dark-2: #c93a3f;
+  --el-color-danger-light-3: #ea6f73;
+  --el-color-danger-light-5: #8a3a3d;
+  --el-color-danger-light-7: #54282a;
+  --el-color-danger-light-8: #381d1f;
+  --el-color-danger-light-9: #241415;
+  --el-color-error: #e5484d;
+  --el-color-error-dark-2: #c93a3f;
+  --el-color-error-light-3: #ea6f73;
+  --el-color-error-light-5: #8a3a3d;
+  --el-color-error-light-7: #54282a;
+  --el-color-error-light-8: #381d1f;
+  --el-color-error-light-9: #241415;
 
-  /* 信息 */
-  --el-color-info: #8a837b;
-  --el-color-info-dark-2: #6f6962;
-  --el-color-info-light-3: #aba59d;
-  --el-color-info-light-5: #c5c0b9;
-  --el-color-info-light-7: #ddd9d2;
-  --el-color-info-light-8: #e8e5df;
-  --el-color-info-light-9: #f3f1ec;
+  /* 信息（夜蓝灰） */
+  --el-color-info: #8e9bb0;
+  --el-color-info-dark-2: #75839a;
+  --el-color-info-light-3: #a5afc0;
+  --el-color-info-light-5: #525c6d;
+  --el-color-info-light-7: #363e4c;
+  --el-color-info-light-8: #262d38;
+  --el-color-info-light-9: #1a2029;
 
-  /* 中性色：文字 / 边框 / 填充（全部换成暖灰系） */
-  --el-text-color-primary: #1f1c19;
-  --el-text-color-regular: #57504a;
-  --el-text-color-secondary: #8a837b;
-  --el-text-color-placeholder: #b4ada3;
-  --el-text-color-disabled: #c7c0b6;
+  /* 中性色：文字 / 边框 / 填充 */
+  --el-text-color-primary: #eae4d3;
+  --el-text-color-regular: #b6bfce;
+  --el-text-color-secondary: #8e9bb0;
+  --el-text-color-placeholder: #5b6678;
+  --el-text-color-disabled: #4a5464;
 
-  --el-border-color: #ded9cf;
-  --el-border-color-light: #e8e4dc;
-  --el-border-color-lighter: #efebe3;
-  --el-border-color-extra-light: #f5f2ec;
+  --el-border-color: rgba(148, 168, 200, 0.2);
+  --el-border-color-light: rgba(148, 168, 200, 0.14);
+  --el-border-color-lighter: rgba(148, 168, 200, 0.1);
+  --el-border-color-extra-light: rgba(148, 168, 200, 0.06);
 
-  --el-fill-color: #f0ede6;
-  --el-fill-color-light: #f5f2ec;
-  --el-fill-color-lighter: #faf8f3;
-  --el-fill-color-extra-light: #fcfbf8;
-  --el-fill-color-dark: #e8e4dc;
-  --el-fill-color-darker: #ded9cf;
+  --el-fill-color: #1a2438;
+  --el-fill-color-light: #162032;
+  --el-fill-color-lighter: #141d2e;
+  --el-fill-color-extra-light: #111a2a;
+  --el-fill-color-dark: #202c44;
+  --el-fill-color-darker: #283550;
+  --el-fill-color-blank: #131c2d;
 
-  --el-bg-color: #ffffff;
-  --el-bg-color-page: #faf9f5;
-  --el-bg-color-overlay: #ffffff;
+  --el-bg-color: #131c2d;
+  --el-bg-color-page: #0c1220;
+  --el-bg-color-overlay: #162032;
 
-  /* 圆角 */
-  --el-border-radius-base: 6px;
-  --el-border-radius-small: 4px;
+  /* 圆角：控件统一 8px（全局标尺：容器 12 / 控件 8） */
+  --el-border-radius-base: 8px;
+  --el-border-radius-small: 6px;
   --el-border-radius-round: 20px;
 
-  /* 表格：暖纸表头 + 细边框 */
-  --el-table-header-bg-color: #f5f2ec;
-  --el-table-header-text-color: #57504a;
-  --el-table-row-hover-bg-color: #f7f4ee;
-  --el-table-tr-bg-color: #ffffff;
-  --el-table-border-color: #efebe3;
+  /* 表格：深夜面板 + 发丝线 */
+  --el-table-header-bg-color: #162032;
+  --el-table-header-text-color: #8e9bb0;
+  --el-table-row-hover-bg-color: #182338;
+  --el-table-tr-bg-color: #131c2d;
+  --el-table-border-color: rgba(148, 168, 200, 0.1);
+  --el-table-text-color: #b6bfce;
 
   /* 卡片 */
-  --el-card-border-color: #e8e4dc;
-  --el-card-border-radius: 10px;
+  --el-card-border-color: rgba(148, 168, 200, 0.12);
+  --el-card-border-radius: 12px;
   --el-card-padding: 20px;
+  --el-card-bg-color: #131c2d;
 
-  /* 遮罩（弹窗背景稍暖） */
-  --el-overlay-color-lighter: rgba(31, 28, 25, 0.5);
+  /* 遮罩（深夜压暗） */
+  --el-overlay-color-lighter: rgba(4, 8, 16, 0.72);
+
+  /* 菜单 */
+  --el-menu-bg-color: transparent;
+  --el-menu-text-color: #8e9bb0;
+  --el-menu-hover-bg-color: #182338;
+  --el-menu-active-color: #f2c979;
+  --el-menu-border-color: transparent;
 }
 
 /* ============================================ */
@@ -181,10 +239,18 @@
 html, body {
   width: 100%;
   height: 100%;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+  font-family: var(--font-body);
   font-size: 14px;
   color: var(--text-primary);
   background-color: var(--bg-color);
+}
+
+/* 夜空：顶部一抹极淡的青蓝夜色 + 底部琥珀余晖（像城市反光） */
+body {
+  background-image:
+    radial-gradient(1100px 500px at 85% -10%, rgba(79, 179, 200, 0.07), transparent 60%),
+    radial-gradient(900px 420px at 10% 110%, rgba(232, 163, 61, 0.05), transparent 60%);
+  background-attachment: fixed;
 }
 
 #app {
@@ -196,15 +262,16 @@ html, body {
 /* 4. Element Plus 组件细节打磨（全局，非 scoped） */
 /* ============================================ */
 
-/* 卡片：细边框 + 极轻暖影，纸感 */
+/* 卡片：发丝边框 + 暗夜底 */
 .el-card {
   border: 1px solid var(--el-card-border-color);
+  background: var(--el-card-bg-color);
   box-shadow: var(--shadow-sm);
   color: var(--text-primary);
 }
 
 .el-card__header {
-  border-bottom-color: var(--el-border-color-lighter);
+  border-bottom-color: var(--el-border-color-extra-light);
 }
 
 /* 表头文字稍加重，有"台账"感 */
@@ -212,12 +279,15 @@ html, body {
   font-weight: 600;
 }
 
-/* 弹窗圆角统一 */
+/* 弹窗圆角统一（容器标尺 12px） */
 .el-dialog {
-  border-radius: 10px;
+  border-radius: 12px;
+  background: var(--bg-panel);
 }
 
-/* 主按钮 hover 由 --el-color-primary-light-3 驱动，无需额外覆盖 */
+.el-message-box {
+  border-radius: 12px;
+}
 
 /* ============================================ */
 /* 5. 通用工具类 */
@@ -254,14 +324,14 @@ html, body {
 .text-warning { color: var(--warning-color); }
 .text-danger { color: var(--danger-color); }
 
-/* 页面大标题（衬线，paper 感）— 各页面可选用 */
+/* 页面大标题（铅字明朝）— 各页面可选用 */
 .page-title-serif {
   font-family: var(--font-serif);
-  letter-spacing: 0.02em;
+  letter-spacing: 0.04em;
 }
 
 /* ============================================ */
-/* 6. 滚动条样式（暖灰） */
+/* 6. 滚动条样式（夜色） */
 /* ============================================ */
 ::-webkit-scrollbar {
   width: 6px;
@@ -269,24 +339,24 @@ html, body {
 }
 
 ::-webkit-scrollbar-track {
-  background: #f5f2ec;
+  background: #0f1626;
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #d5cfc4;
+  background: #283550;
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #b8b0a2;
+  background: #3a4a6a;
 }
 
 /* ============================================ */
 /* 7. 卡片通用样式 */
 /* ============================================ */
 .card {
-  background: var(--bg-white);
+  background: var(--bg-panel);
   border: 1px solid var(--border-color);
   border-radius: var(--border-radius-lg);
   box-shadow: var(--shadow-sm);
@@ -310,10 +380,10 @@ html, body {
 /* 9. 第二轮深化：全局细节打磨 */
 /* ============================================ */
 
-/* 选中文字：赤陶浅底 */
+/* 选中文字：琥珀浅底 */
 ::selection {
-  background: #f5ded4;
-  color: #1f1c19;
+  background: rgba(232, 163, 61, 0.28);
+  color: #fdf6e8;
 }
 
 /* 表头：小字 + 字距，"台账"感 */
@@ -332,23 +402,25 @@ html, body {
   font-weight: 500;
 }
 
-/* 弹窗标题：衬线 */
+/* 弹窗标题：铅字明朝 */
 .el-dialog__title {
   font-family: var(--font-serif);
   font-weight: 600;
   font-size: 17px;
+  letter-spacing: 0.03em;
 }
 
-/* 输入框聚焦：赤陶浅晕 */
+/* 输入框聚焦：琥珀浅晕 */
 .el-input__wrapper.is-focus {
-  box-shadow: 0 0 0 1px var(--el-color-primary) inset, 0 0 0 3px rgba(201, 106, 74, 0.14);
+  box-shadow: 0 0 0 1px var(--el-color-primary) inset, 0 0 0 3px rgba(232, 163, 61, 0.16);
 }
 
 /* ============================================ */
 /* 10. 表格精修：更通透的行距与发丝线 */
 /* ============================================ */
 .el-table {
-  --el-table-border-color: #f0ece4;
+  --el-table-border-color: rgba(148, 168, 200, 0.08);
+  --el-table-bg-color: transparent;
   font-size: 13px;
   color: var(--text-regular);
 }
@@ -365,10 +437,43 @@ html, body {
 
 /* 表头下缘一条明确的发丝线 */
 .el-table th.el-table__cell {
-  border-bottom: 1px solid #e8e4dc;
+  border-bottom: 1px solid var(--border-color);
 }
 
 /* 表格外圆角（配合卡片） */
 .el-table__inner-wrapper {
   border-radius: 8px;
+}
+
+/* ============================================ */
+/* 11. 无障碍：尊重减弱动效偏好 */
+/* ============================================ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ============================================ */
+/* 12. 按钮统一规范 */
+/*    - 主按钮：琥珀底 + 深字（白字在琥珀上对比度不足） */
+/*    - 幽灵按钮：透明底 + 发丝描边，hover 填充（各组件自定义按钮照此模式） */
+/*    - 圆角一律 8px（--el-border-radius-base 已统一） */
+/* ============================================ */
+/* 主按钮：琥珀底 + 深字（白字在琥珀上对比度不足）。
+   注意排除 plain/text/link 变体——它们文字走语义色，深字会糊在深色底上 */
+html.dark .el-button--primary:not(.is-plain):not(.is-text):not(.is-link),
+html.dark .el-button--warning:not(.is-plain):not(.is-text):not(.is-link) {
+  --el-button-text-color: #241a08;
+  --el-button-hover-text-color: #241a08;
+  --el-button-active-text-color: #241a08;
+  font-weight: 600;
+}
+
+/* 键盘焦点可见 */
+:focus-visible {
+  outline: 2px solid rgba(232, 163, 61, 0.6);
+  outline-offset: 2px;
 }

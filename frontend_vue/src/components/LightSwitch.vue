@@ -32,7 +32,7 @@ const toggleLight = () => {
 
 <style scoped>
 .light-switch {
-  background-color: #fff3e0;
+  background-color: var(--bg-panel);
   padding: 20px;
   border-radius: 8px;
   text-align: center;
@@ -40,32 +40,32 @@ const toggleLight = () => {
 }
 
 button {
-  background-color: #ff9800;
-  color: white;
+  background-color: var(--primary-color);
+  color: #1a1408;
   border: none;
   padding: 10px 20px;
-  border-radius: 4px;
+  border-radius: 8px;
   cursor: pointer;
   font-size: 16px;
   margin-bottom: 15px;
 }
 
 button:hover {
-  background-color: #f57c00;
+  background-color: var(--primary-dark);
 }
 
 .light-on {
-  background-color: #fff9c4;
+  background-color: var(--primary-tint);
   padding: 15px;
-  border-radius: 4px;
+  border-radius: 8px;
   font-size: 18px;
 }
 
 .light-off {
-  background-color: #263238;
-  color: white;
+  background-color: var(--bg-inset);
+  color: var(--text-secondary);
   padding: 15px;
-  border-radius: 4px;
+  border-radius: 8px;
   font-size: 18px;
 }
 </style>

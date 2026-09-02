@@ -28,6 +28,9 @@ import DeviceStatusPie from '@/components/DeviceStatusPie.vue'
 // 导入设备卡片组件
 import DeviceCard from '@/components/DeviceCard.vue'
 
+// 签名 Hero：一盏真灯（光晕由实时数据驱动）
+import LampHero from '@/components/LampHero.vue'
+
 // ============================================
 // 2. 获取 Store 和路由
 // ============================================
@@ -76,13 +79,9 @@ onUnmounted(() => {
 <template>
   <div class="dashboard">
     <!-- ============================================ -->
-    <!-- 页面标题 -->
+    <!-- 签名 Hero：一盏真灯（替代原页面标题） -->
     <!-- ============================================ -->
-    <header class="page-header">
-      <p class="eyebrow">Smart Street Light</p>
-      <h1>启晖智慧路灯管理系统</h1>
-      <p class="subtitle">IoT 设备监控平台</p>
-    </header>
+    <LampHero />
 
     <!-- ============================================ -->
     <!-- 统计卡片 -->
@@ -170,51 +169,6 @@ onUnmounted(() => {
   margin: 0 auto;
 }
 
-/* 页头 hero：深墨 + 赤陶辉光 */
-.page-header {
-  position: relative;
-  overflow: hidden;
-  text-align: center;
-  padding: 52px 24px 48px;
-  background: #1c1b1a;
-  color: #f5f3ee;
-  border-radius: 14px;
-  margin-bottom: 24px;
-}
-
-.page-header::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: radial-gradient(640px 220px at 78% -10%, rgba(201, 106, 74, 0.32), transparent 62%);
-  pointer-events: none;
-}
-
-.eyebrow {
-  position: relative;
-  font-size: 11px;
-  letter-spacing: 0.3em;
-  text-transform: uppercase;
-  color: #e09b83;
-  margin-bottom: 14px;
-}
-
-.page-header h1 {
-  position: relative;
-  font-size: 32px;
-  font-family: var(--font-serif);
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  margin-bottom: 12px;
-}
-
-.subtitle {
-  position: relative;
-  font-size: 13px;
-  letter-spacing: 0.22em;
-  color: #a8a29c;
-}
-
 .stats-section {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -222,19 +176,20 @@ onUnmounted(() => {
   margin-bottom: 24px;
 }
 
-/* 统计卡：左对齐编辑风，标签 + 大数字 */
+/* 统计卡：深夜面板，标签 + 大数字（Plex Mono） */
 .stat-card {
-  background: #ffffff;
-  border: 1px solid #e8e4dc;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
   padding: 18px 20px 16px;
   border-radius: 12px;
   text-align: left;
   box-shadow: var(--shadow-sm);
-  transition: box-shadow 0.2s, transform 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s, transform 0.2s;
 }
 
 .stat-card:hover {
-  box-shadow: var(--shadow-md);
+  border-color: rgba(232, 163, 61, 0.35);
+  box-shadow: var(--glow-amber);
   transform: translateY(-2px);
 }
 
@@ -244,7 +199,7 @@ onUnmounted(() => {
   gap: 7px;
   font-size: 12px;
   letter-spacing: 0.12em;
-  color: #8a837b;
+  color: var(--text-secondary);
 }
 
 .stat-label::before {
@@ -252,7 +207,7 @@ onUnmounted(() => {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: #c96a4a;
+  background: var(--primary-color);
   flex-shrink: 0;
 }
 
@@ -261,28 +216,29 @@ onUnmounted(() => {
   font-size: 32px;
   font-weight: 600;
   font-family: var(--font-mono);
-  color: #1f1c19;
+  color: var(--text-primary);
   margin-top: 10px;
 }
 
 .stat-card.online .stat-label::before {
-  background: #5f8f5a;
+  background: var(--success-color);
 }
 
 .stat-card.offline .stat-label::before {
-  background: #c7c0b6;
+  background: var(--text-placeholder);
 }
 
 .stat-card.fault .stat-label::before {
-  background: #be4b40;
+  background: var(--danger-color);
 }
 
 .stat-card.lamp-on .stat-label::before {
-  background: #dda15e;
+  background: var(--primary-color);
+  box-shadow: 0 0 8px rgba(232, 163, 61, 0.7);
 }
 
 .stat-card.lamp-off .stat-label::before {
-  background: #c7c0b6;
+  background: var(--text-placeholder);
 }
 
 .charts-section {
@@ -293,7 +249,7 @@ onUnmounted(() => {
   margin-bottom: 20px;
 }
 
-/* 小节标题：衬线 + 赤陶标尺 */
+/* 小节标题：铅字明朝 + 琥珀标尺 */
 .device-section h2 {
   display: flex;
   align-items: center;
@@ -301,7 +257,8 @@ onUnmounted(() => {
   font-size: 22px;
   font-family: var(--font-serif);
   font-weight: 600;
-  color: #1f1c19;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
   margin-bottom: 16px;
 }
 
@@ -309,13 +266,20 @@ onUnmounted(() => {
   content: '';
   width: 4px;
   height: 20px;
-  background: #c96a4a;
+  background: var(--primary-color);
   border-radius: 2px;
+  box-shadow: 0 0 10px rgba(232, 163, 61, 0.5);
 }
 
 .device-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 16px;
+}
+
+@media (max-width: 720px) {
+  .stats-section {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 </style>

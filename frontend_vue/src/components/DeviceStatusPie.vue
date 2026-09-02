@@ -37,17 +37,17 @@ const statusData = computed(() => {
         {
             value: deviceStore.onlineCount,
             name: '在线',
-            itemStyle: { color: '#5f8f5a' }
+            itemStyle: { color: '#6fae6a' }
         },
         {
             value: deviceStore.offlineCount,
             name: '离线',
-            itemStyle: { color: '#b4ada3' }
+            itemStyle: { color: '#4a5464' }
         },
         {
             value: deviceStore.faultCount,
             name: '故障',
-            itemStyle: { color: '#be4b40' }
+            itemStyle: { color: '#e5484d' }
         }
     ]
     console.log('状态数据更新：', data)
@@ -85,18 +85,18 @@ const updateChart = () => {
             left: 'center',
             top: '30%',
             itemGap: 6,
-            textStyle: { fontSize: 28, fontWeight: 600, color: '#1f1c19' },
-            subtextStyle: { fontSize: 12, color: '#8a837b' }
+            textStyle: { fontSize: 28, fontWeight: 600, color: '#eae4d3' },
+            subtextStyle: { fontSize: 12, color: '#8e9bb0' }
         },
 
         tooltip: {
             trigger: 'item',
-            backgroundColor: '#ffffff',
-            borderColor: '#e8e4dc',
+            backgroundColor: '#162032',
+            borderColor: 'rgba(148, 168, 200, 0.2)',
             borderWidth: 1,
             padding: [8, 12],
-            textStyle: { color: '#1f1c19', fontSize: 12 },
-            extraCssText: 'box-shadow: 0 4px 16px rgba(60, 50, 40, 0.12); border-radius: 8px;',
+            textStyle: { color: '#eae4d3', fontSize: 12 },
+            extraCssText: 'box-shadow: 0 4px 16px rgba(0,0,0,0.5); border-radius: 8px;',
             formatter: '{b}：{c} 台（{d}%）'
         },
 
@@ -108,7 +108,7 @@ const updateChart = () => {
             itemWidth: 8,
             itemHeight: 8,
             itemGap: 18,
-            textStyle: { color: '#57504a', fontSize: 12 }
+            textStyle: { color: '#b6bfce', fontSize: 12 }
         },
 
         series: [
@@ -121,7 +121,7 @@ const updateChart = () => {
                 avoidLabelOverlap: false,
                 itemStyle: {
                     borderRadius: 6,       // 圆角分段
-                    borderColor: '#ffffff',
+                    borderColor: '#131c2d',
                     borderWidth: 2
                 },
                 label: { show: false },  // 不要外引标签，靠图例 + tooltip
@@ -141,7 +141,7 @@ const updateChart = () => {
             style: {
                 text: '暂无设备',
                 fontSize: 14,
-                fill: '#b4ada3'
+                fill: '#5b6678'
             }
         }] : []
     }
@@ -225,14 +225,14 @@ onUnmounted(() => {
     margin: 0 0 4px 4px;
     font-size: 15px;
     font-weight: 600;
-    color: #1f1c19;
+    color: var(--text-primary);
 }
 
 .chart-title::before {
     content: '';
     width: 3px;
     height: 14px;
-    background: #c96a4a;
+    background: var(--primary-color);
     border-radius: 2px;
 }
 

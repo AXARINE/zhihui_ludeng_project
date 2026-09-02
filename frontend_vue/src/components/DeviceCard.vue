@@ -220,12 +220,12 @@ onUnmounted(() => {
 
 <style scoped>
 .device-card {
-  border: 1px solid #e8e4dc;
-  border-top: 3px solid #ded9cf;
+  border: 1px solid var(--border-color);
+  border-top: 3px solid var(--border-color-dark);
   border-radius: 12px;
   padding: 18px;
   margin: 8px;
-  background: #ffffff;
+  background: var(--bg-panel);
   box-shadow: var(--shadow-sm);
   transition: box-shadow 0.2s, transform 0.2s;
   cursor: pointer;
@@ -238,15 +238,15 @@ onUnmounted(() => {
 
 /* 状态色收到卡片顶部饰条 */
 .device-card.status-online {
-  border-top-color: #5f8f5a;
+  border-top-color: var(--success-color);
 }
 
 .device-card.status-offline {
-  border-top-color: #d5cfc4;
+  border-top-color: #4a5464;
 }
 
 .device-card.status-fault {
-  border-top-color: #be4b40;
+  border-top-color: var(--danger-color);
 }
 
 .device-header {
@@ -262,13 +262,13 @@ onUnmounted(() => {
   font-size: 17px;
   font-family: var(--font-serif);
   font-weight: 600;
-  color: #1f1c19;
+  color: var(--text-primary);
 }
 
 .device-id {
   font-size: 11px;
   font-family: var(--font-mono);
-  color: #a8a29c;
+  color: var(--text-secondary);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -288,18 +288,18 @@ onUnmounted(() => {
 }
 
 .status-pill.online {
-  background: #f0f6ee;
-  color: #4f7a4b;
+  background: rgba(111, 174, 106, 0.14);
+  color: var(--success-color);
 }
 
 .status-pill.offline {
-  background: #f3f1ec;
-  color: #8a837b;
+  background: rgba(148, 168, 200, 0.1);
+  color: var(--text-secondary);
 }
 
 .status-pill.fault {
-  background: #f9ece9;
-  color: #a03b31;
+  background: rgba(229, 72, 77, 0.14);
+  color: #ea6f73;
 }
 
 /* 键值行：发丝线分隔 */
@@ -308,12 +308,12 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   padding: 9px 0;
-  border-top: 1px solid #f5f2ec;
+  border-top: 1px solid var(--border-color);
   font-size: 13px;
 }
 
 .lamp-info .label, .mode-info .label {
-  color: #8a837b;
+  color: var(--text-secondary);
 }
 
 .lamp-info .value {
@@ -321,16 +321,16 @@ onUnmounted(() => {
 }
 
 .lamp-info .value.on {
-  color: #c08340;
+  color: var(--primary-color);
 }
 
 .lamp-info .value.off {
-  color: #a8a29c;
+  color: var(--text-secondary);
 }
 
 .mode-info .value {
   font-weight: 600;
-  color: #c96a4a;
+  color: var(--primary-color);
 }
 
 /* 幽灵按钮：描边 + 悬停填充 */
@@ -358,39 +358,39 @@ onUnmounted(() => {
 }
 
 .btn-on {
-  border-color: #5f8f5a;
-  color: #4f7a4b;
+  border-color: var(--success-color);
+  color: var(--success-color);
 }
 
 .btn-on:hover:not(:disabled) {
-  background: #5f8f5a;
-  color: #f7faf6;
+  background: var(--success-color);
+  color: #1a1408;
 }
 
 .btn-off {
-  border-color: #be4b40;
-  color: #a03b31;
+  border-color: var(--danger-color);
+  color: #ea6f73;
 }
 
 .btn-off:hover:not(:disabled) {
-  background: #be4b40;
-  color: #fdf5f4;
+  background: var(--danger-color);
+  color: #1a1408;
 }
 
 .btn-auto {
-  border-color: #c96a4a;
-  color: #b85a3c;
+  border-color: var(--primary-color);
+  color: var(--primary-light);
 }
 
 .btn-auto:hover:not(:disabled) {
-  background: #c96a4a;
-  color: #fff7f2;
+  background: var(--primary-color);
+  color: #1a1408;
 }
 
 .update-time {
   font-size: 11px;
   font-family: var(--font-mono);
-  color: #b4ada3;
+  color: var(--text-placeholder);
   text-align: right;
   margin-top: 8px;
 }
@@ -401,7 +401,7 @@ onUnmounted(() => {
 
 .no-perm-text {
   font-size: 12px;
-  color: #b4ada3;
+  color: var(--text-placeholder);
   padding: 8px 0;
 }
 </style>

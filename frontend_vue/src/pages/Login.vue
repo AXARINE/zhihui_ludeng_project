@@ -69,7 +69,11 @@ async function handleLogin() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #faf9f5;
+  /* 深夜渐变底：夜空蓝黑 + 顶部青蓝夜色 + 底部城市反光的琥珀余晖 */
+  background:
+    radial-gradient(1000px 480px at 82% -12%, rgba(79, 179, 200, 0.12), transparent 62%),
+    radial-gradient(860px 460px at 10% 112%, rgba(232, 163, 61, 0.1), transparent 62%),
+    linear-gradient(180deg, #0c1220 0%, #080d18 100%);
   padding: 20px;
 }
 
@@ -77,14 +81,14 @@ async function handleLogin() {
   display: flex;
   width: 720px;
   max-width: 100%;
-  background: #fff;
-  border: 1px solid #e8e4dc;
-  border-radius: 14px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 8px 32px rgba(60, 50, 40, 0.1);
+  box-shadow: var(--shadow-lg), var(--glow-amber);
 }
 
-/* ---- 左侧深墨品牌区 ---- */
+/* ---- 左侧夜色品牌区 ---- */
 .brand-pane {
   position: relative;
   width: 300px;
@@ -92,8 +96,8 @@ async function handleLogin() {
   display: flex;
   flex-direction: column;
   padding: 44px 36px;
-  background: #1c1b1a;
-  color: #f5f3ee;
+  background: var(--bg-inset);
+  color: var(--text-primary);
   overflow: hidden;
 }
 
@@ -101,7 +105,7 @@ async function handleLogin() {
   content: '';
   position: absolute;
   inset: 0;
-  background: radial-gradient(360px 220px at 85% -5%, rgba(201, 106, 74, 0.38), transparent 62%);
+  background: radial-gradient(360px 220px at 85% -5%, rgba(232, 163, 61, 0.32), transparent 62%);
   pointer-events: none;
 }
 
@@ -110,14 +114,14 @@ async function handleLogin() {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: linear-gradient(135deg, #c96a4a, #a8532f);
-  color: #fff7f2;
+  background: linear-gradient(135deg, var(--primary-color), var(--primary-dark));
+  color: #241a08;
   font-family: var(--font-serif);
   font-size: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 10px rgba(201, 106, 74, 0.4);
+  box-shadow: 0 2px 10px rgba(232, 163, 61, 0.4);
 }
 
 .brand-pane h1 {
@@ -135,17 +139,17 @@ async function handleLogin() {
   margin: 8px 0 0;
   font-size: 12px;
   letter-spacing: 0.22em;
-  color: #a8a29c;
+  color: var(--text-secondary);
 }
 
 .brand-foot {
   position: relative;
   margin: 28px 0 0;
   padding-top: 14px;
-  border-top: 1px solid #2a2825;
+  border-top: 1px solid var(--border-color);
   font-size: 11px;
   letter-spacing: 0.05em;
-  color: #7a746c;
+  color: var(--text-placeholder);
 }
 
 /* ---- 右侧表单区 ---- */
@@ -159,35 +163,37 @@ async function handleLogin() {
   font-family: var(--font-serif);
   font-size: 22px;
   font-weight: 600;
-  color: #1f1c19;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
 }
 
 .subtitle {
-  color: #8a837b;
+  color: var(--text-secondary);
   font-size: 13px;
   margin: 0 0 26px;
 }
 
 .form-group { margin-bottom: 16px; }
-.form-group label { display: block; margin-bottom: 6px; color: #57504a; font-size: 13px; font-weight: 500; }
+.form-group label { display: block; margin-bottom: 6px; color: var(--text-regular); font-size: 13px; font-weight: 500; }
 .form-group input {
-  width: 100%; padding: 11px 14px; border: 1px solid #ded9cf; border-radius: 8px;
-  font-size: 14px; box-sizing: border-box; background: #fcfbf8;
+  width: 100%; padding: 11px 14px; border: 1px solid var(--border-color-dark); border-radius: 8px;
+  font-size: 14px; box-sizing: border-box; background: var(--bg-inset); color: var(--text-primary);
   transition: border-color 0.2s, background 0.2s, box-shadow 0.2s;
 }
+.form-group input::placeholder { color: var(--text-placeholder); }
 .form-group input:focus {
-  border-color: #c96a4a; background: #fff; outline: none;
-  box-shadow: 0 0 0 3px rgba(201, 106, 74, 0.14);
+  border-color: var(--primary-color); background: var(--bg-panel); outline: none;
+  box-shadow: 0 0 0 3px rgba(232, 163, 61, 0.18);
 }
 .login-btn {
-  width: 100%; padding: 12px; background: #c96a4a; color: #fff7f2; border: none;
+  width: 100%; padding: 12px; background: var(--primary-color); color: #241a08; border: none;
   border-radius: 8px; font-size: 15px; font-weight: 500; letter-spacing: 0.1em;
   cursor: pointer; margin-top: 8px;
   transition: background 0.2s;
 }
-.login-btn:hover { background: #b85a3c; }
-.login-btn:disabled { background: #e4b5a5; cursor: not-allowed; }
-.error-msg { background: #f9ece9; color: #be4b40; padding: 10px 12px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; }
+.login-btn:hover { background: var(--primary-dark); }
+.login-btn:disabled { background: #4d3f22; color: var(--text-placeholder); cursor: not-allowed; }
+.error-msg { background: rgba(229, 72, 77, 0.12); color: #ea6f73; padding: 10px 12px; border-radius: 8px; margin-bottom: 16px; font-size: 13px; }
 
 /* 窄屏：隐藏品牌区，单栏表单 */
 @media (max-width: 720px) {

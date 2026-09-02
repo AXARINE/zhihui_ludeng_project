@@ -261,7 +261,7 @@ function buildOption() {
       series: [],
       graphic: [{
         type: 'text', left: 'center', top: 'middle',
-        style: { text: '曲线未启用（回退施密特开关灯）', fontSize: 13, fill: '#b4ada3' }
+        style: { text: '曲线未启用（回退施密特开关灯）', fontSize: 13, fill: '#5b6678' }
       }]
     }
   }
@@ -296,11 +296,11 @@ function buildOption() {
     animation: false,
     tooltip: {
       trigger: 'item',
-      backgroundColor: '#ffffff',
-      borderColor: '#e8e4dc',
+      backgroundColor: '#162032',
+      borderColor: 'rgba(148, 168, 200, 0.2)',
       borderWidth: 1,
-      textStyle: { color: '#1f1c19', fontSize: 12 },
-      extraCssText: 'box-shadow: 0 4px 16px rgba(60,50,40,0.12); border-radius: 8px;',
+      textStyle: { color: '#eae4d3', fontSize: 12 },
+      extraCssText: 'box-shadow: 0 4px 16px rgba(0,0,0,0.5); border-radius: 8px;',
       formatter: (p) => {
         const d = p.data
         if (d.realLux == null) return ''
@@ -315,14 +315,14 @@ function buildOption() {
       name: isLog ? '环境照度 lux（100 以下线性，以上对数）' : '环境照度 lux',
       nameLocation: 'middle',
       nameGap: 26,
-      nameTextStyle: { color: '#b4ada3', fontSize: 11 },
+      nameTextStyle: { color: '#8e9bb0', fontSize: 11 },
       min: aMin,
       max: aMax,
       // 对数模式刻度按整数 t 标注：0、100、1k、10k、100k
       interval: isLog ? 1 : undefined,
       minInterval: isLog ? 1 : undefined,
       axisLabel: {
-        color: '#a8a29c',
+        color: '#8e9bb0',
         fontSize: 11,
         // 一律整数标注：对数模式非整数刻度（如布局抖动时的 t=2.37）直接不显示，
         // 避免冒出 23.442k 这种小数标签；线性模式刻度值取整
@@ -334,19 +334,19 @@ function buildOption() {
             }
           : (v) => String(Math.round(v))
       },
-      axisLine: { lineStyle: { color: '#ded9cf' } },
-      splitLine: { show: true, lineStyle: { color: '#f0ece4', type: 'dashed' } }
+      axisLine: { lineStyle: { color: 'rgba(148, 168, 200, 0.25)' } },
+      splitLine: { show: true, lineStyle: { color: 'rgba(148, 168, 200, 0.08)', type: 'dashed' } }
     },
     yAxis: {
       type: 'value',
       name: '亮度 %',
-      nameTextStyle: { color: '#b4ada3', fontSize: 11 },
+      nameTextStyle: { color: '#8e9bb0', fontSize: 11 },
       min: 0,
       max: 100,
       interval: 20,
-      axisLabel: { color: '#a8a29c', fontSize: 11, formatter: '{value}%' },
-      axisLine: { lineStyle: { color: '#ded9cf' } },
-      splitLine: { lineStyle: { color: '#f0ece4', type: 'dashed' } }
+      axisLabel: { color: '#8e9bb0', fontSize: 11, formatter: '{value}%' },
+      axisLine: { lineStyle: { color: 'rgba(148, 168, 200, 0.25)' } },
+      splitLine: { lineStyle: { color: 'rgba(148, 168, 200, 0.08)', type: 'dashed' } }
     },
     series: [
       {
@@ -355,7 +355,7 @@ function buildOption() {
         data: lineData.map(d => ({ value: [d.x, d.y], realLux: d.realLux, pct: d.pct })),
         symbol: 'none',
         silent: true,
-        lineStyle: { color: '#c96a4a', width: 2.5 },
+        lineStyle: { color: '#e8a33d', width: 2.5 },
         z: 2
       },
       {
@@ -363,12 +363,12 @@ function buildOption() {
         type: 'scatter',
         data: plotPts.map(d => ({ value: [d.x, d.y], realLux: d.realLux, pct: d.pct })),
         symbolSize: 10,
-        itemStyle: { color: '#c96a4a', borderColor: '#ffffff', borderWidth: 2 },
+        itemStyle: { color: '#e8a33d', borderColor: '#131c2d', borderWidth: 2 },
         label: {
           show: true,
           position: 'top',
           distance: 6,
-          color: '#57504a',
+          color: '#b6bfce',
           fontSize: 11,
           formatter: (p) => `${p.data.pct}%`
         },
@@ -676,10 +676,10 @@ function handleResize() {
 }
 
 .curve-editor-body {
-  border: 1px dashed #ded9cf;
-  border-radius: 10px;
+  border: 1px dashed var(--border-color-dark);
+  border-radius: 12px;
   padding: 16px;
-  background: #fdfcf9;
+  background: var(--bg-inset);
 }
 
 .anchor-head {
@@ -699,7 +699,7 @@ function handleResize() {
 .anchor-index {
   width: 28px;
   font-size: 12px;
-  color: #c96a4a;
+  color: var(--primary-color);
   font-weight: 600;
 }
 
@@ -714,7 +714,7 @@ function handleResize() {
 .anchor-arrow,
 .anchor-unit {
   font-size: 12px;
-  color: #8a837b;
+  color: var(--text-secondary);
 }
 
 .curve-errors {
@@ -731,7 +731,7 @@ function handleResize() {
 .chart-title {
   font-size: 13px;
   font-weight: 600;
-  color: #1f1c19;
+  color: var(--text-primary);
 }
 
 .scale-switch {
@@ -741,24 +741,24 @@ function handleResize() {
 
 .scale-btn {
   padding: 3px 12px;
-  border: 1px solid #ded9cf;
-  border-radius: 14px;
-  background: #fff;
-  color: #57504a;
+  border: 1px solid var(--border-color-dark);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-regular);
   font-size: 12px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .scale-btn:hover {
-  border-color: #c96a4a;
-  color: #c96a4a;
+  border-color: var(--primary-color);
+  color: var(--primary-color);
 }
 
 .scale-btn.active {
-  background: #c96a4a;
-  border-color: #c96a4a;
-  color: #fff7f2;
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+  color: #1a1408;
 }
 
 .curve-chart {

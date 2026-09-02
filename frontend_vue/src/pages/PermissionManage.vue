@@ -195,7 +195,7 @@ function handleCheckChange(permId, checked) {
 .page-header {
   margin-bottom: 24px;
   padding-bottom: 14px;
-  border-bottom: 1px solid #efebe3;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .page-header h2 {
@@ -206,21 +206,22 @@ function handleCheckChange(permId, checked) {
   font-size: 24px;
   font-family: var(--font-serif);
   font-weight: 600;
-  color: #1f1c19;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
 }
 
 .page-header h2::before {
   content: '';
   width: 4px;
   height: 0.95em;
-  background: #c96a4a;
+  background: var(--primary-color);
   border-radius: 2px;
 }
 
 .page-header .desc {
   margin: 0;
   font-size: 14px;
-  color: #8a837b;
+  color: var(--text-secondary);
 }
 
 .perm-content {
@@ -233,9 +234,9 @@ function handleCheckChange(permId, checked) {
 .role-panel {
   width: 280px;
   flex-shrink: 0;
-  background: #fff;
-  border-radius: 10px;
-  border: 1px solid #e8e4dc;
+  background: var(--bg-panel);
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
   overflow: hidden;
 }
 
@@ -243,9 +244,9 @@ function handleCheckChange(permId, checked) {
   padding: 14px 16px;
   font-size: 15px;
   font-weight: 600;
-  color: #1f1c19;
-  background: #f5f2ec;
-  border-bottom: 1px solid #e8e4dc;
+  color: var(--text-primary);
+  background: var(--bg-inset);
+  border-bottom: 1px solid var(--border-color);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -259,52 +260,52 @@ function handleCheckChange(permId, checked) {
 .role-item {
   padding: 14px 16px;
   cursor: pointer;
-  border-bottom: 1px solid #f5f2ec;
+  border-bottom: 1px solid var(--border-color);
   border-left: 3px solid transparent;
   transition: background 0.15s;
 }
 
 .role-item:hover {
-  background: #faf8f3;
+  background: var(--bg-panel-hover);
 }
 
 .role-item.active {
-  background: #faede7;
-  border-left: 3px solid #c96a4a;
+  background: var(--primary-tint);
+  border-left: 3px solid var(--primary-color);
 }
 
 .role-name {
   font-size: 14px;
   font-weight: 600;
-  color: #1f1c19;
+  color: var(--text-primary);
 }
 
 .role-code {
   font-size: 12px;
   font-family: var(--font-mono);
-  color: #8a837b;
+  color: var(--text-secondary);
   margin-top: 2px;
 }
 
 .role-desc {
   font-size: 12px;
-  color: #b4ada3;
+  color: var(--text-placeholder);
   margin-top: 4px;
 }
 
 .empty-hint {
   padding: 40px 16px;
   text-align: center;
-  color: #b4ada3;
+  color: var(--text-placeholder);
   font-size: 14px;
 }
 
 /* 右侧权限配置 */
 .perm-panel {
   flex: 1;
-  background: #fff;
-  border-radius: 10px;
-  border: 1px solid #e8e4dc;
+  background: var(--bg-panel);
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
   padding: 20px;
   min-height: 400px;
 }
@@ -316,7 +317,7 @@ function handleCheckChange(permId, checked) {
 }
 
 .perm-group {
-  border: 1px solid #efebe3;
+  border: 1px solid var(--border-color);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -325,9 +326,9 @@ function handleCheckChange(permId, checked) {
   padding: 10px 14px;
   font-size: 13px;
   font-weight: 600;
-  color: #57504a;
-  background: #faf8f3;
-  border-bottom: 1px solid #efebe3;
+  color: var(--text-regular);
+  background: var(--bg-inset);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .group-items {
@@ -339,13 +340,13 @@ function handleCheckChange(permId, checked) {
 
 .perm-name {
   font-size: 13px;
-  color: #1f1c19;
+  color: var(--text-primary);
 }
 
 .perm-code {
   font-size: 12px;
   font-family: var(--font-mono);
-  color: #8a837b;
+  color: var(--text-secondary);
   margin-left: 4px;
 }
 
@@ -358,7 +359,7 @@ function handleCheckChange(permId, checked) {
 
 .save-hint {
   font-size: 12px;
-  color: #8a837b;
+  color: var(--text-secondary);
 }
 
 .no-selection {
@@ -366,7 +367,7 @@ function handleCheckChange(permId, checked) {
   align-items: center;
   justify-content: center;
   height: 300px;
-  color: #b4ada3;
+  color: var(--text-placeholder);
   font-size: 16px;
 }
 </style>

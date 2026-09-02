@@ -93,12 +93,13 @@ function aggregateData(records, period) {
 }
 
 // ============================================
-// 获取当前设备 ID（取第一个设备）
+// 获取当前设备 ID（优先第一个在线设备——离线设备往往无光照数据，图表会空）
 // ============================================
 function getDeviceId() {
   const devices = deviceStore.deviceList
   if (devices && devices.length > 0) {
-    return devices[0].id
+    const online = devices.find(d => d.status === 'ONLINE')
+    return (online || devices[0]).id
   }
   return null
 }
@@ -162,15 +163,15 @@ const updateChart = (times, values, period) => {
     // 页面每 5 秒轮询会触发整图重绘，关闭动画防止参考线/折线反复播入场动画
     animation: false,
 
-    // 提示框：白底暖边 + 轻投影
+    // 提示框：深夜面板底 + 冷调描边 + 重投影
     tooltip: {
       trigger: 'axis',
-      backgroundColor: '#ffffff',
-      borderColor: '#e8e4dc',
+      backgroundColor: '#162032',
+      borderColor: 'rgba(148, 168, 200, 0.2)',
       borderWidth: 1,
       padding: [8, 12],
-      textStyle: { color: '#1f1c19', fontSize: 12 },
-      extraCssText: 'box-shadow: 0 4px 16px rgba(60, 50, 40, 0.12); border-radius: 8px;',
+      textStyle: { color: '#eae4d3', fontSize: 12 },
+      extraCssText: 'box-shadow: 0 4px 16px rgba(0,0,0,0.5); border-radius: 8px;',
       formatter: function(params) {
         const p = params[0]
         return `${p.axisValue}<br/>光照强度：<b>${p.value}</b> lux`
@@ -184,7 +185,7 @@ const updateChart = (times, values, period) => {
       axisLabel: {
         rotate: times.length > 30 ? 45 : 0,
         fontSize: 10,
-        color: '#a8a29c'
+        color: '#8e9bb0'
       },
       axisLine: { show: false },
       axisTick: { show: false }
@@ -193,9 +194,9 @@ const updateChart = (times, values, period) => {
     yAxis: {
       type: 'value',
       name: 'lux',
-      nameTextStyle: { color: '#b4ada3', fontSize: 11 },
-      axisLabel: { color: '#a8a29c', fontSize: 11 },
-      splitLine: { lineStyle: { color: '#f0ece4', type: 'dashed' } },
+      nameTextStyle: { color: '#8e9bb0', fontSize: 11 },
+      axisLabel: { color: '#8e9bb0', fontSize: 11 },
+      splitLine: { lineStyle: { color: 'rgba(148, 168, 200, 0.08)', type: 'dashed' } },
       min: 0
     },
 
@@ -210,12 +211,12 @@ const updateChart = (times, values, period) => {
         symbolSize: 5,
         areaStyle: {
           color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-            { offset: 0, color: 'rgba(201, 106, 74, 0.18)' },
-            { offset: 1, color: 'rgba(201, 106, 74, 0.02)' }
+            { offset: 0, color: 'rgba(232, 163, 61, 0.25)' },
+            { offset: 1, color: 'rgba(232, 163, 61, 0.02)' }
           ])
         },
-        lineStyle: { color: '#c96a4a', width: 2.5 },
-        itemStyle: { color: '#c96a4a', borderColor: '#ffffff', borderWidth: 1.5 },
+        lineStyle: { color: '#e8a33d', width: 2.5 },
+        itemStyle: { color: '#e8a33d', borderColor: '#131c2d', borderWidth: 1.5 },
         // 阈值参考线
         markLine: {
           silent: true,
@@ -223,8 +224,8 @@ const updateChart = (times, values, period) => {
           data: [
             {
               yAxis: threshold,
-              label: { formatter: `阈值 ${threshold}`, position: 'insideEndTop', color: '#c08340', fontSize: 11 },
-              lineStyle: { color: '#dda15e', type: 'dashed', width: 1 }
+              label: { formatter: `阈值 ${threshold}`, position: 'insideEndTop', color: '#f2c979', fontSize: 11 },
+              lineStyle: { color: '#e8a33d', type: 'dashed', width: 1 }
             }
           ]
         }
@@ -247,7 +248,7 @@ const updateChart = (times, values, period) => {
       style: {
         text: '暂无数据',
         fontSize: 14,
-        fill: '#b4ada3'
+        fill: '#5b6678'
       }
     }] : []
   }
@@ -342,14 +343,14 @@ onUnmounted(() => {
   margin: 0;
   font-size: 15px;
   font-weight: 600;
-  color: #1f1c19;
+  color: var(--text-primary);
 }
 
 .chart-title::before {
   content: '';
   width: 3px;
   height: 14px;
-  background: #c96a4a;
+  background: var(--primary-color);
   border-radius: 2px;
 }
 
@@ -361,29 +362,29 @@ onUnmounted(() => {
 
 .period-btn {
   padding: 4px 14px;
-  border: 1px solid #ded9cf;
-  border-radius: 20px;
-  background: #fff;
-  color: #57504a;
+  border: 1px solid var(--border-color-dark);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-regular);
   font-size: 13px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .period-btn:hover {
-  border-color: #c96a4a;
-  color: #c96a4a;
+  border-color: var(--primary-color);
+  color: var(--primary-color);
 }
 
 .period-btn.active {
-  background: #c96a4a;
-  border-color: #c96a4a;
-  color: #fff7f2;
+  background: var(--primary-color);
+  border-color: var(--primary-color);
+  color: #1a1408;
 }
 
 .loading-text {
   font-size: 12px;
-  color: #b4ada3;
+  color: var(--text-placeholder);
   margin-left: 8px;
 }
 

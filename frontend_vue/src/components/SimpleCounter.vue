@@ -19,7 +19,7 @@ const addOne = () => {
 
 <style scoped>
 .counter {
-  background-color: #e3f2fd;
+  background-color: var(--bg-panel);
   padding: 20px;
   border-radius: 8px;
   text-align: center;
@@ -27,16 +27,16 @@ const addOne = () => {
 }
 
 button {
-  background-color: #2196f3;
-  color: white;
+  background-color: var(--night-cyan);
+  color: #0c1220;
   border: none;
   padding: 10px 20px;
-  border-radius: 4px;
+  border-radius: 8px;
   cursor: pointer;
   font-size: 16px;
 }
 
 button:hover {
-  background-color: #1976d2;
+  background-color: var(--night-cyan-dim);
 }
 </style>
