@@ -38,7 +38,7 @@ Hi3861 --Wi-Fi/MQTT(1883)--> 华为云 IoTDA <--北向 API(HTTPS, AK/SK V11 衍�
 |---|---|---|
 | Wi-Fi SSID / 密码 | 固件 `app_config.h` | 自备(2.4G) |
 | 设备 ID / 设备密钥 | 固件 `app_config.h` | 控制台 → 注册设备(§3.3) |
-| 实例**设备侧域名** | 固件 `e53_sc1_example.cpp` 顶部 `CONFIG_APP_SERVERIP` | 控制台 → 实例 → 接入信息(§3.1) |
+| 实例**设备侧域名** | 固件 `include/app_config.h` 的 `CONFIG_APP_SERVERIP` | 控制台 → 实例 → 接入信息(§3.1) |
 | 实例**应用侧域名** | `config.json` 的 `iotda_endpoint` | 同上 |
 | 项目 ID | `config.json` 的 `huawei_project_id` | 我的凭证 → 项目列表(对应区域行) |
 | AK / SK | `config.json` 的 `huawei_ak` / `huawei_sk` | 我的凭证 → 访问密钥(§3.4) |
@@ -48,7 +48,7 @@ Hi3861 --Wi-Fi/MQTT(1883)--> 华为云 IoTDA <--北向 API(HTTPS, AK/SK V11 衍�
 ### 3.1 创建实例并记录接入信息
 
 1. 设备接入 IoTDA → 开通/创建**标准版实例**(区域如 **cn-south-1**,单设备演示免费额度足够)。
-2. 实例详情 → **接入信息**,记下**设备侧域名**(`xxx.st1.iotda-device.{region}.myhuaweicloud.com` → 填固件)与**应用侧域名**(`xxx.st1.iotda-app...` → 填 config.json)。
+2. 实例详情 → **接入信息**,记下**设备侧域名**(`xxx.st1.iotda-device.{region}.myhuaweicloud.com` → 填固件 `include/app_config.h` 的 `CONFIG_APP_SERVERIP`)与**应用侧域名**(`xxx.st1.iotda-app...` → 填 config.json)。
 3. ⚠️ 标准版/企业版**没有区域共享域名**(`iotda.{region}.myhuaweicloud.com` 不存在),必须用实例级域名。
 
 ### 3.2 创建产品与模型
@@ -94,7 +94,7 @@ git clone --recursive https://github.com/AXARINE/zhihui_ludeng_project.git
 cd zhihui_ludeng_project
 # 配置凭据:复制模板并填写(Wi-Fi + 设备 ID/密钥;该文件被 .gitignore 忽略)
 cp C3_e53_sc1_pls/include/app_config.example.h C3_e53_sc1_pls/include/app_config.h
-# 编辑 C3_e53_sc1_pls/e53_sc1_example.cpp 顶部 CONFIG_APP_SERVERIP = 实例设备侧域名
+# 编辑 C3_e53_sc1_pls/include/app_config.h 的 CONFIG_APP_SERVERIP = 实例设备侧域名
 
 ./build.sh      # Docker 一键编译
 ./flash.sh 4    # 烧录(4 换成板子 COM 号);HiBurn 弹出后按一下开发板 RESET,烧完再按一次 RESET 运行

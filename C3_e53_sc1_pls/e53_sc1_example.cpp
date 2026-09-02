@@ -31,9 +31,8 @@ namespace {
 
 /* 注意:IoTDA 8883 MQTTS 在本工程 iot_link/mbedtls 上实测不可用
  * (证书解析 calloc 内核崩溃、订阅 90s 超时、断开清理 panic,详见 git 记录),
- * 故设备侧保持 1883 明文。iotda_ca.h 保留备用,勿直接启用。 */
-constexpr char kServerIp[] =
-    "69b5bf8bcd.st1.iotda-device.cn-south-1.myhuaweicloud.com"; // IoTDA 实例设备侧域名
+ * 故设备侧保持 1883 明文。iotda_ca.h 保留备用,勿直接启用。
+ * 实例设备侧域名在 include/app_config.h 的 CONFIG_APP_SERVERIP 配置。 */
 constexpr char kServerPort[] = "1883"; // MQTT 明文(8883 TLS 在 Hi3861 iot_link 上不可用)
 constexpr int kMqttLifeTimeSec = 60;   ///< 心跳周期,秒
 
@@ -413,7 +412,7 @@ int mqtt_connect(void) {
   connect_para.boostrap = 0;
   connect_para.device_id = sdk_str(CONFIG_APP_DEVICEID);
   connect_para.device_passwd = sdk_str(CONFIG_APP_DEVICEPWD);
-  connect_para.server_addr = sdk_str(kServerIp);
+  connect_para.server_addr = sdk_str(CONFIG_APP_SERVERIP);
   connect_para.server_port = sdk_str(kServerPort);
   connect_para.life_time = kMqttLifeTimeSec;
   connect_para.rcvfunc = msg_rcv_callback;

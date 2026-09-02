@@ -12,4 +12,9 @@
 #define CONFIG_APP_DEVICEID "IoTDA 注册设备后生成的设备ID"
 #define CONFIG_APP_DEVICEPWD "设备密钥"
 
+/* IoTDA 实例设备侧域名(MQTT 接入地址,非保密项但换实例需改,
+ * 形如 xxx.st1.iotda-device.{region}.myhuaweicloud.com,
+ * 在控制台 → 实例 → 接入信息 查看;不要填应用侧域名/区域共享域名) */
+#define CONFIG_APP_SERVERIP "xxx.st1.iotda-device.cn-south-1.myhuaweicloud.com"
+
 #endif /* __APP_CONFIG_H__ */
