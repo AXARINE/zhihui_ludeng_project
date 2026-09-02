@@ -116,9 +116,10 @@ cp app_config.example.h app_config.h
 #define CONFIG_WIFI_PWD  "你的WiFi密码"
 #define CONFIG_APP_DEVICEID  "..."           // IoTDA 设备 ID
 #define CONFIG_APP_DEVICEPWD "..."           // 设备密钥
+#define CONFIG_APP_SERVERIP  "xxx.st1.iotda-device.cn-south-1.myhuaweicloud.com" // 实例设备侧域名
 ```
 
-IoTDA 实例**设备侧**域名（`CONFIG_APP_SERVERIP`）在 `e53_sc1_example.cpp` 顶部，形如 `xxx.st1.iotda-device.cn-south-1.myhuaweicloud.com`。产品模型 `Light`：属性 `Luminance`(int) + `LightStatus`(string) + `Brightness`(int,0~100) 每 5s 上报；命令 `Light_Control_Led`（Led=ON/OFF/AUTO）；可写属性 `Threshold`(int)、`Brightness`(int 0~100)、`DimCurve`(string ≤64)（**全部必须"可读可写"**，否则下发报 IOTDA.000029)。
+IoTDA 实例**设备侧**域名（`CONFIG_APP_SERVERIP`）在 `include/app_config.h`（与凭据同处，非保密项，换实例需改），形如 `xxx.st1.iotda-device.cn-south-1.myhuaweicloud.com`。产品模型 `Light`：属性 `Luminance`(int) + `LightStatus`(string) + `Brightness`(int,0~100) 每 5s 上报；命令 `Light_Control_Led`（Led=ON/OFF/AUTO）；可写属性 `Threshold`(int)、`Brightness`(int 0~100)、`DimCurve`(string ≤64)（**全部必须"可读可写"**，否则下发报 IOTDA.000029)。
 
 ## 项目结构
 
@@ -198,7 +199,7 @@ A: 检查是否用了旧版 SDK-HMAC-SHA256——标准版/企业版必须 V11 �
 A: 后端有 **90s 本地失联检测**：`last_seen_at`（以 IoTDA 平台事件时间为心跳）超过 90s 未前进即标记离线。先检查 `app_config.h` 的设备 ID/密钥、WiFi 是否 2.4GHz、固件日志是否每 5s 上报；再确认设备已在 `POST /api/devices` 注册（未注册设备不被轮询）。
 
 **Q: 命令下发超时（IOTDA.014111）/ 设备反复离线重启**
-A: 确认固件用的是 1883 明文连接且 `CONFIG_APP_SERVERIP` 为设备侧实例域名；8883 MQTTS 在本工程不可用（证书解析会崩溃），不要启用。
+A: 确认固件用的是 1883 明文连接且 `CONFIG_APP_SERVERIP`（在 `include/app_config.h`）为设备侧实例域名；8883 MQTTS 在本工程不可用（证书解析会崩溃），不要启用。
 
 **Q: 数据转发推送 401**
 A: 配置了 `IOTDA_WEBHOOK_TOKEN` 后，IoTDA 控制台推送规则的自定义 Header 里必须加 `Authorization: Bearer <token>`（与 `IOTDA_WEBHOOK_TOKEN` 同值）；推送为主时建议 `IOTDA_POLL_INTERVAL_SECS=60`（轮询兜底校准）。
